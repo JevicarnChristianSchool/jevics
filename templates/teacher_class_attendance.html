@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{settings.school_name}} | Class Register</title>
+<link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}">
+<style>{{theme_style|default('', true)|safe}}{{theme_preset_style|safe}}
+.register-head{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:12px}
+.roll-table{min-width:900px}.roll-table th{white-space:nowrap}.roll-table td{vertical-align:middle}.register-student{font-weight:800}.register-admission{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.attendance-choice{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.attendance-btn{min-width:82px}.attendance-btn.selected{transform:translateY(-1px);box-shadow:0 0 0 3px rgba(255,255,255,.16),0 8px 18px rgba(0,0,0,.15)}.attendance-btn.btn-success{background:linear-gradient(135deg,#16a34a,#15803d)}.attendance-btn.btn-danger{background:linear-gradient(135deg,#ef4444,#b91c1c)}.attendance-btn.undo{background:rgba(255,255,255,.07);color:var(--primary-text);border-color:var(--text-border,var(--border))}.reason-input{min-width:220px}.register-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.register-summary .mini-card{min-width:120px}.register-note{border-left:4px solid var(--primary-blue);background:var(--text-soft);padding:12px 14px;border-radius:10px}.submit-row{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px}.unsaved-dot{width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;box-shadow:0 0 0 5px rgba(245,158,11,.12)}
+@media(max-width:900px){.register-head{grid-template-columns:1fr}.roll-table{min-width:760px}.reason-input{min-width:180px}}
+</style>
+</head>
+<body class="app-body">
+<main class="content" style="max-width:1500px;margin:auto;width:100%">
+<header class="topbar glass"><div><div class="eyebrow">Teacher · Attendance</div><h1>Class register</h1><div class="topbar-subtitle">Mark each learner, undo mistakes, add an optional reason, then submit when the register is final.</div></div><div class="top-actions"><a class="btn btn-ghost" href="{{ url_for("teacher_dashboard") }}">Teacher dashboard</a><a class="btn btn-ghost" href="/logout">Logout</a></div></header>
+{% if not assigned_classes %}
+<section class="panel glass"><h2>Register access is not assigned</h2><p class="muted">An Administrator must assign you as the class teacher before the complete learner list becomes available.</p><a class="btn btn-primary" href="{{ url_for("teacher_dashboard") }}">Back to Teacher Dashboard</a></section>
+{% else %}
+<section class="panel glass">
+<div class="register-head">
+<label><span>Class</span><select id="classSelector" onchange="this.form.submit()" form="filterForm" name="class_name"><option value="">Select class</option>{% for c in assigned_classes %}<option value="{{c}}" {% if c==selected_class %}selected{% endif %}>{{c}}</option>{% endfor %}</select></label>
+<label><span>Subject / lesson</span><input id="subjectField" form="filterForm" name="subject" value="{{subject}}" required></label>
+<label><span>Attendance date</span><input form="filterForm" type="date" name="attendance_date" value="{{attendance_date}}"></label>
+</div>
+<form id="filterForm" method="get" style="margin-top:14px"><button class="btn btn-primary" type="submit">Load register</button></form>
+</section>
+{% if students %}
+<section class="panel glass">
+<div class="register-summary" style="margin-bottom:14px"><div class="mini-card"><span>Learners</span><strong>{{students|length}}</strong></div><div class="mini-card"><span>Marked</span><strong id="markedCount">0</strong></div><div class="mini-card"><span>Unmarked</span><strong id="unmarkedCount">{{students|length}}</strong></div><button class="btn btn-ghost mini" type="button" onclick="setAll('Present')">Mark all present</button><button class="btn btn-ghost mini" type="button" onclick="setAll('Absent')">Mark all absent</button></div>
+<div class="register-note"><strong>Review before submission.</strong> Present and Absent can be changed at any time before you submit. <strong>Undo</strong> removes the mark. A reason is optional.</div>
+<form method="post" id="attendanceForm">
+<input type="hidden" name="class_name" value="{{selected_class}}"><input type="hidden" name="subject" value="{{subject}}"><input type="hidden" name="attendance_date" value="{{attendance_date}}">
+<div class="table-wrap" style="margin-top:16px"><table class="roll-table"><thead><tr><th>Admission number</th><th>Student name</th><th>Attendance</th><th>Reason (optional)</th></tr></thead><tbody>
+{% for st in students %}{% set old=existing.get(st.id) %}
+<tr data-row="{{st.id}}">
+<td class="register-admission">{{st.admission_no}}</td>
+<td class="register-student">{{st.full_name}}</td>
+<td><div class="attendance-choice"><input type="hidden" name="attendance_{{st.id}}" id="attendance_{{st.id}}" value="{{old.status if old and old.status in ['Present','Absent'] else ''}}"><button type="button" class="btn btn-success mini attendance-btn {% if old and old.status=='Present' %}selected{% endif %}" data-value="Present" onclick="setAttendance({{st.id}},'Present')">Present</button><button type="button" class="btn btn-danger mini attendance-btn {% if old and old.status=='Absent' %}selected{% endif %}" data-value="Absent" onclick="setAttendance({{st.id}},'Absent')">Absent</button><button type="button" class="btn undo mini attendance-btn" data-value="" onclick="setAttendance({{st.id}},'')">Undo</button></div></td>
+<td><input class="reason-input" name="note_{{st.id}}" value="{{old.note if old else ''}}" placeholder="Optional reason / note"></td>
+</tr>
+{% endfor %}</tbody></table></div>
+<div class="submit-row"><div class="muted"><span class="unsaved-dot"></span> Changes stay on this page until you press Submit attendance.</div><button class="btn btn-primary" type="submit">Submit attendance</button></div>
+</form>
+</section>
+{% elif selected_class %}<section class="panel glass"><p class="muted">No active learners are attached to {{selected_class}}.</p></section>{% endif %}
+{% endif %}
+</main>
+<script>
+const totalStudents={{students|length}};
+function setAttendance(id,v){const h=document.getElementById('attendance_'+id);if(!h)return;h.value=v;const row=h.closest('tr');row.querySelectorAll('.attendance-btn').forEach(b=>b.classList.toggle('selected',b.dataset.value===v));updateCounts();}
+function updateCounts(){let marked=0;document.querySelectorAll('input[id^="attendance_"]').forEach(h=>{if(h.value)marked++;});const m=document.getElementById('markedCount'),u=document.getElementById('unmarkedCount');if(m)m.textContent=marked;if(u)u.textContent=Math.max(totalStudents-marked,0);}
+function setAll(v){document.querySelectorAll('input[id^="attendance_"]').forEach(h=>setAttendance(h.id.replace('attendance_',''),v));}
+updateCounts();
+</script>
+{% include '_footer.html' %}
+</body></html>

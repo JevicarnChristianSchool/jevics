@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: prime-institution-os
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app

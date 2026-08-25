@@ -1,0 +1,46 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ current_user.role }} | Profile</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>{{theme_style|safe}}{{theme_preset_style|safe}}</style></head>
+<body class="app-body sidebar-style-{{ school_settings.sidebar_style|default("drawer", true) }}">{% include "_notification_bell.html" %}
+  <div class="scroll-rail" id="scrollRail" aria-hidden="true"><div class="scroll-track"><div class="scroll-thumb" id="scrollThumb"></div></div></div>
+  <main class="content single">
+    <section class="topbar glass">
+      <div>
+        <div class="eyebrow">Profile</div>
+        <h1>{{ profile_user.full_name }}</h1>
+        <div class="muted">{{ workspace }}</div>
+      </div>
+      <div class="top-actions">
+        <a class="btn btn-ghost" href="{{ url_for('admin_dashboard') if profile_user.role == 'Admin' else url_for('dashboard') }}">Back</a>
+        <a class="btn btn-ghost" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>
+      {% endif %}
+    {% endwith %}
+
+    <section class="panel glass profile-card">
+      <div class="panel-head"><div><div class="eyebrow">Account details</div><h3>Edit profile</h3></div></div>
+      <form class="stack-form" method="post" enctype="multipart/form-data">
+        <label><span>Full name</span><input name="full_name" value="{{ profile_user.full_name }}" required></label>
+        <label><span>Username</span><input value="{{ profile_user.username }}" disabled></label>
+        <label><span>Role</span><input value="{{ profile_user.role }}" disabled></label>
+        <label><span>Profile photo</span>{% if profile_user.profile_photo %}<img src="/{{ profile_user.profile_photo }}" alt="Profile photo" style="width:84px;height:84px;border-radius:50%;object-fit:cover;border:1px solid var(--border);margin:6px 0 8px">{% endif %}<input type="file" name="profile_photo" accept=".png,.jpg,.jpeg,.webp"><small class="muted">This photo is used on official exam cards.</small></label>
+        <label><span>New password</span><div class="password-wrap"><input id="profilePassword" name="password" type="password" minlength="4" placeholder="Leave blank to keep current"><button class="password-toggle" type="button" data-password-target="profilePassword">Show</button></div></label>
+        <button class="btn btn-primary" type="submit">Save changes</button>
+      </form>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+<div style="position:fixed;right:14px;bottom:14px;z-index:90;display:flex;gap:8px"><a class="btn btn-ghost mini" href="/system-help">Help</a><a class="btn btn-primary mini" href="/ai-assistant">AI</a></div>{% include '_footer.html' %}</body>
+</html>

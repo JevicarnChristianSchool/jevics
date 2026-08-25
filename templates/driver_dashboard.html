@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{{settings.school_name}} | Driver</title><link rel="manifest" href="{{url_for('static',filename='manifest.json')}}"><link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}"><style>{{theme_style|default('',true)|safe}}{{theme_preset_style|safe}} .driver-mobile{max-width:560px;margin:0 auto}.driver-card{padding:24px!important}.driver-hero h1{font-size:clamp(30px,8vw,44px);margin:6px 0}.driver-status{display:flex;align-items:center;gap:8px;font-weight:800}.driver-status-dot{width:10px;height:10px;border-radius:50%;background:#2457d6;box-shadow:0 0 0 6px rgba(36,87,214,.12)}.driver-actions{display:grid;gap:10px}.driver-actions .btn{min-height:54px}.driver-connection{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:14px;background:rgba(36,87,214,.08);border:1px solid rgba(36,87,214,.12)}.driver-connection strong{font-size:13px}.driver-connection span{font-size:12px;color:var(--muted-text)}</style></head>
+<body class="app-body sidebar-style-drawer">
+<main class="content"><div class="driver-mobile">
+<header class="topbar glass"><div><div class="eyebrow">Driver app</div><h1>{{settings.school_name}}</h1><div class="topbar-subtitle">{{actor_name}}</div></div></header>
+<section class="panel glass driver-card driver-hero">
+<div class="driver-status"><span class="driver-status-dot"></span><span id="networkState">Checking connection…</span></div>
+<h1 id="tripStatus">{% if trip %}Trip active{% else %}Ready for your trip{% endif %}</h1>
+{% if trip %}<p class="muted">{{trip.vehicle_type or trip.vehicle}}{% if trip.number_plate %} · {{trip.number_plate}}{% endif %}{% if trip.route_name %} · {{trip.route_name}}{% endif %}<br>Started {{trip.started_at}}</p>{% else %}<p class="muted">Start a trip when you are ready. Location data is shared live when online and queued automatically when offline.</p>{% endif %}
+<div class="driver-connection"><strong id="syncTitle">GPS sync</strong><span id="syncState">Waiting…</span></div>
+{% if not trip %}<form method="post" action="/driver/trip/start" class="stack-form"><input name="vehicle_type" placeholder="Vehicle type (e.g. Bus / Van)" required><input name="number_plate" placeholder="Number plate" required><input name="route_name" placeholder="Route / destination"><button class="btn btn-primary big" type="submit">Start trip</button></form>{% else %}<div class="driver-actions"><button class="btn btn-danger big" id="stop" type="button">Stop trip</button></div>{% endif %}
+<div class="driver-actions" style="margin-top:12px"><a class="btn btn-ghost" href="/communication">Messages</a><a class="btn btn-ghost" href="/attendance">Check in / out QR</a><a class="btn btn-ghost" href="/notifications">Notifications{% if notification_count %} ({{notification_count}}){% endif %}</a><a class="btn btn-ghost" href="/attendance">Attendance / QR</a><a class="btn btn-ghost" href="/logout">Logout</a></div>
+</section>
+{% if trip %}<section class="panel glass driver-card"><div class="eyebrow">Offline ready</div><h2 style="margin:6px 0">Drive normally</h2><p class="muted">The app keeps a local GPS queue if the connection drops, then sends the stored points when the device comes back online.</p><div class="mini-card"><strong id="queueCount">0</strong><span>queued location points</span></div></section>{% endif %}
+</div></main>
+{% if trip %}<form id="stopForm" method="post" action="/driver/trip/stop" hidden></form><script>
+const DRIVER_QUEUE_KEY='prime_driver_location_queue_v2';
+const qEl=document.getElementById('queueCount'), networkEl=document.getElementById('networkState'), syncEl=document.getElementById('syncState');
+let queue=[]; try{queue=JSON.parse(localStorage.getItem(DRIVER_QUEUE_KEY)||'[]')}catch(e){queue=[]}
+function saveQueue(){localStorage.setItem(DRIVER_QUEUE_KEY,JSON.stringify(queue.slice(-5000)));if(qEl)qEl.textContent=queue.length}
+function setNet(){const on=navigator.onLine;networkEl.textContent=on?'Online · live data enabled':'Offline · storing data locally';networkEl.previousElementSibling.style.background=on?'#2457d6':'#a66b00';syncEl.textContent=on?(queue.length?`Syncing ${queue.length} queued point${queue.length===1?'':'s'}…`:'Live'):'Queued on device';}
+async function send(item){const r=await fetch('/driver/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});if(!r.ok)throw new Error('sync failed')}
+async function flush(){if(!navigator.onLine||!queue.length){setNet();return}while(queue.length){try{await send(queue[0]);queue.shift();saveQueue()}catch(e){break}}setNet()}
+function push(pos){const item={latitude:pos.coords.latitude,longitude:pos.coords.longitude,speed_kph:pos.coords.speed?pos.coords.speed*3.6:0,accuracy:pos.coords.accuracy,source:navigator.onLine?'online':'offline',recorded_at:new Date().toISOString()};if(navigator.onLine){send(item).catch(()=>{queue.push(item);saveQueue()})}else{queue.push(item);saveQueue()}setNet()}
+window.addEventListener('online',flush);window.addEventListener('offline',setNet);setInterval(flush,15000);saveQueue();setNet();navigator.geolocation?.watchPosition(push,()=>{syncEl.textContent='Location permission is required for live tracking'}, {enableHighAccuracy:true,maximumAge:5000,timeout:15000});
+document.getElementById('stop').onclick=()=>document.getElementById('stopForm').submit();
+</script>{% endif %}
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}</script>
+{% include '_footer.html' %}</body></html>

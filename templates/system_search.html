@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ settings.school_name }} | System Search</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    {{ theme_style|safe }}{{ theme_preset_style|safe }}
+    .search-page{max-width:1100px;margin:0 auto;display:grid;gap:16px}
+    .search-main{padding:28px}
+    .search-form{display:flex;gap:10px;align-items:center}
+    .search-form input{flex:1;font-size:17px;padding:14px 16px}
+    .search-results{display:grid;gap:8px}
+    .search-result{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:16px;border:1px solid var(--text-border);border-radius:14px;background:var(--panel)}
+    .search-result:hover{background:var(--text-hover)}
+    .search-result-copy{min-width:0}.search-result-title{font-size:16px;font-weight:900}.search-result-desc{margin-top:4px;color:var(--muted-text);font-size:13px}.search-result-tag{display:inline-flex;align-items:center;white-space:nowrap;padding:5px 8px;border-radius:999px;background:var(--panel-3);font-size:11px;font-weight:800}
+    .empty{padding:32px;text-align:center}
+    @media(max-width:650px){.search-form{flex-direction:column;align-items:stretch}.search-result{align-items:flex-start;flex-direction:column}.search-result .btn{width:100%}}
+  </style>
+</head>
+<body class="app-body">
+  <main class="content" style="min-height:100vh">
+    <div class="search-page">
+      <header class="topbar glass">
+        <div>
+          <div class="eyebrow">{{ role }} · System search</div>
+          <h1 style="margin:.2rem 0">Find anything</h1>
+          <div class="topbar-subtitle">Search features, settings, QR tools, people and records available to your dashboard.</div>
+        </div>
+        <div class="quick-actions">
+          <a class="btn btn-ghost" href="{{ '{{ url_for("admin_dashboard") }}' if role=='Admin' else '/ict' if role=='ICT' else '/dashboard' }}">Home</a>
+          <a class="btn btn-ghost" href="/logout">Logout</a>
+        </div>
+      </header>
+      <section class="panel glass search-main">
+        <form class="search-form" method="get" action="/system-search">
+          <input name="q" value="{{ term }}" placeholder="Try: QR, school settings, employees, timetable, analytics, fees..." autofocus autocomplete="off">
+          <button class="btn btn-primary" type="submit">Search</button>
+        </form>
+      </section>
+      <section class="panel glass">
+        <div class="panel-head">
+          <div><div class="eyebrow">Results</div><h2>{{ results|length }} match{% if results|length != 1 %}es{% endif %}</h2></div>
+          {% if term %}<span class="search-result-tag">“{{ term }}”</span>{% endif %}
+        </div>
+        {% if results %}
+          <div class="search-results">
+          {% for item in results %}
+            <a class="search-result" href="{{ item.url }}">
+              <div class="search-result-copy"><div class="search-result-title">{{ item.title }}</div><div class="search-result-desc">{{ item.description }}</div></div>
+              <span class="search-result-tag">{{ item.kind|default('Feature') }}</span>
+            </a>
+          {% endfor %}
+          </div>
+        {% elif term %}
+          <div class="empty"><h3>No matching item</h3><p class="muted">Try a shorter word such as <strong>QR</strong>, <strong>attendance</strong>, <strong>settings</strong>, <strong>employee</strong> or <strong>student</strong>.</p></div>
+        {% else %}
+          <div class="empty"><h3>Start with one word</h3><p class="muted">The search is tied to your role, so results only point to areas you can use.</p></div>
+        {% endif %}
+      </section>
+    </div>
+  </main>
+</body>
+</html>

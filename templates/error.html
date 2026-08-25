@@ -1,0 +1,24 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>{{theme_style|safe}}{{theme_preset_style|safe}}</style></head>
+<body class="auth-body">
+  <main class="auth-shell">
+    <section class="auth-card glass">
+      <div class="eyebrow">School portal</div>
+      <h1>{{ title }}</h1>
+      <p class="muted">{{ message }}</p>
+      <a class="btn btn-primary btn-block" href="{{ url_for('login') }}">Go back</a>
+    </section>
+  </main>
+<footer class="portal-watermark">© 2026 Toror Technology and Innovations Ltd. All rights reserved.</footer>
+<style>
+.portal-watermark{margin-top:36px;padding:16px 20px;text-align:center;font-size:12px;opacity:.62;letter-spacing:.15px;border-top:1px solid rgba(255,255,255,.08)}
+</style>
+</body>
+</html>

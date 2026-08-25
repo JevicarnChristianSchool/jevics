@@ -1,0 +1,448 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ school_settings.school_name }} | Admin Command Centre</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="{{ theme_color }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>{{theme_style|safe}}{{theme_preset_style|safe}}
+.admin-home-qr{display:grid;grid-template-columns:1fr 270px;gap:22px;align-items:stretch;padding:24px;border:1px solid var(--text-border);border-radius:18px;background:linear-gradient(135deg,rgba(52,87,213,.12),rgba(15,23,42,.02))}.admin-home-copy h2{font-size:clamp(30px,3vw,46px);margin:.35rem 0}.admin-qr-box{display:grid;place-items:center;text-align:center;gap:8px;padding:18px;border:1px solid var(--text-border);border-radius:16px;background:var(--panel)}.admin-qr-box img{width:180px;height:180px;object-fit:contain;border-radius:10px;background:#fff;padding:8px}.manual-attendance{display:grid;grid-template-columns:1.1fr .7fr 1fr 1.2fr auto;gap:8px;margin-top:18px}.manual-attendance select,.manual-attendance input{min-width:0}.today-attendance-card{margin-top:14px;padding:16px;border:1px solid var(--text-border);border-radius:16px;background:var(--panel)}.clean-attendance th{font-size:11px;text-transform:uppercase;letter-spacing:.05em}.chart-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.chart-card{padding:16px;border:1px solid var(--text-border);border-radius:16px;background:var(--panel)}.chart-row{display:grid;grid-template-columns:92px 1fr 34px;gap:8px;align-items:center;margin:12px 0;font-size:12px}.chart-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chart-track{height:10px;border-radius:999px;background:var(--text-soft);overflow:hidden}.chart-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#3457d5,#6d5ce7)}.admin-search-mini{margin-top:8px}.admin-search-mini form{display:flex;gap:7px}.admin-search-mini input{width:min(330px,28vw);padding:9px 11px;border:1px solid var(--text-border);background:var(--panel-3);color:var(--primary-text);border-radius:10px}.admin-search-mini button{padding:9px 11px;border:1px solid var(--text-border);background:var(--panel);color:var(--primary-text);border-radius:10px;font-weight:800;cursor:pointer}@media(max-width:1100px){.manual-attendance{grid-template-columns:1fr 1fr}.admin-home-qr{grid-template-columns:1fr}.chart-grid{grid-template-columns:1fr}}@media(max-width:700px){.admin-search-mini input{width:170px}.manual-attendance{grid-template-columns:1fr}.admin-qr-box img{width:150px;height:150px}}
+</style></head>
+<body class="app-body admin-body sidebar-style-{{ school_settings.sidebar_style|default("drawer", true) }}">{% include "_notification_bell.html" %}
+  <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+  <div class="scroll-rail" id="scrollRail" aria-hidden="true"><div class="scroll-track"><div class="scroll-thumb" id="scrollThumb"></div></div></div>
+
+  <aside class="sidebar glass sidebar-drawer" id="sidebarDrawer" aria-label="Admin navigation">
+    <div class="sidebar-head">
+      <div class="brand-line">
+        <span class="brand-dot"></span>
+        <div>
+          <div class="brand-name">{{ school_settings.school_name }}</div>
+          <div class="brand-subtitle">Admin command centre</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-title">
+      <div class="eyebrow">Institution OS</div>
+      <h2>Control centre</h2>
+    </div>
+
+    <nav class="side-nav side-nav-groups" aria-label="Admin sections">
+      <section class="nav-group open"><button class="nav-group-toggle" type="button" aria-expanded="true" data-target="admin-overview-panel"><span>Home</span><span class="nav-caret">⌂</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="admin-overview-panel">QR & daily attendance</button></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="people-links"><span>People</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><a class="nav-link" href="/admin/learners">Students</a><a class="nav-link" href="/admin/employees">Employees</a><a class="nav-link" href="/allocate">Allocate</a></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="analytics-panel"><span>Summary & Analytics</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="admin-overview-panel" data-scroll="admin-metrics">Summary</button><button class="nav-link nav-action" type="button" data-target="analytics-panel">Charts & breakdowns</button></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="operations-links"><span>Operations</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><a class="nav-link" href="/admin/attendance">Attendance detail</a><a class="nav-link" href="/staff/timetable">Timetable</a><a class="nav-link" href="/staff/reminders">Reminders</a><a class="nav-link" href="/calendar">School calendar</a><a class="nav-link" href="/reception">Reception</a></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="finance-panel"><span>Finance</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="finance-panel">Finance overview</button><a class="nav-link" href="/finance-dashboard">Finance workspace</a></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="exam-panel"><span>Academics</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="exam-panel">Examinations</button><button class="nav-link nav-action" type="button" data-target="admin-add-student">Add student</button><a class="nav-link" href="/admin/subjects">Subjects</a><a class="nav-link" href="/admin/student-allocation">Student & teacher allocation</a></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="settings-panel"><span>School settings</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="settings-panel">School & branding</button><button class="nav-link nav-action" type="button" data-target="public-face-panel">Public face</button></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="system-links"><span>System</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="exports-panel">Exports</button><button class="nav-link nav-action" type="button" data-target="backup-panel">Backup & restore</button><button class="nav-link nav-action" type="button" data-target="audit-panel">Audit logs</button><a class="nav-link" href="/system-help">System Help</a><a class="nav-link" href="/ai-assistant">AI Assistant</a></div></section>
+    </nav>
+
+    <div class="sidebar-spacer" aria-hidden="true"></div>
+    <div class="sidebar-foot">
+      <a class="btn btn-ghost btn-block" href="{{ url_for('logout') }}"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5"></path><path d="M15 12H3"></path><path d="M14 4h5v16h-5"></path></svg><span>Logout</span></a>
+    </div>
+  </aside>
+
+  <main class="content">
+    <header class="topbar glass slim-topbar admin-topbar">
+      <div class="topbar-left">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Open navigation"><span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <div class="topbar-brand">
+          <div class="topbar-title">Admin Command Centre</div>
+          <div class="topbar-subtitle">{{ school_settings.school_name }}</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="muted topbar-clock" id="liveClock">Tuesday, Aug 4, 2026 • 11:30:58</div>
+        
+      </div>
+</header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <section class="portal-adverts">{% for ad in active_adverts %}<article class="advert-card"><span class="eyebrow">School advert · {{ad.poster or 'School'}}</span><h3>{{ad.title}}</h3><p>{{ad.body}}</p>{% if ad.link_url %}<a class="btn btn-ghost mini" href="{{ad.link_url}}" target="_blank" rel="noopener">Open link</a>{% endif %}</article>{% endfor %}</section>
+<section id="admin-overview-panel" class="panel glass workspace-panel landing-panel">
+      <div class="admin-home-qr">
+        <div class="admin-home-copy">
+          <div class="eyebrow">Today · {{ local_today }}</div>
+          <h2>Attendance Home</h2>
+          <p class="hero-copy">Scan a staff QR to sign in or out and open that person’s dashboard. No phone? Record the employee manually here.</p>
+          <div class="quick-actions"><a class="btn btn-primary" href="/admin/attendance">Open attendance detail</a><a class="btn btn-ghost" href="/admin/employees">View employees</a><a class="btn btn-ghost" href="/system-search?q=QR">Find QR tools</a></div>
+          <form method="post" action="/admin/attendance/manual" class="manual-attendance">
+            <select name="user_id" required><option value="">Select employee…</option>{% for u in users %}{% if u.role not in ['Student','Parent','System'] %}<option value="{{u.id}}">{{u.full_name}} · {{u.role}}</option>{% endif %}{% endfor %}</select>
+            <select name="action" required><option value="IN">Sign in</option><option value="OUT">Sign out</option></select>
+            <input type="datetime-local" name="event_at" aria-label="Attendance time">
+            <input name="location_label" placeholder="Location (e.g. Juja Theta, Main Gate)">
+            <button class="btn btn-primary" type="submit">Save attendance</button>
+          </form>
+        </div>
+        <div class="admin-qr-box"><div class="eyebrow">Staff QR</div><img src="/admin/attendance/qr" alt="Institution staff attendance QR"><strong>Scan to sign in / sign out</strong><span class="muted small">The same QR flow also authenticates staff to their own dashboard.</span></div>
+      </div>
+      <div class="today-attendance-card">
+        <div class="panel-head"><div><div class="eyebrow">Live register</div><h3>Today’s staff status</h3></div><span class="muted small">One row per employee</span></div>
+        <div class="table-wrap"><table class="clean-attendance"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Sign in</th><th>Sign out</th></tr></thead><tbody>{% for a in today_attendance %}<tr><td><strong>{{a.full_name}}</strong></td><td>{{a.role}}</td><td>{{a.location or '—'}}</td><td>{% if a.sign_in_local %}{{a.sign_in_local[11:16]}}{% else %}<span class="muted">Not signed in</span>{% endif %}</td><td>{% if a.sign_out_local %}{{a.sign_out_local[11:16]}}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No active employees found.</td></tr>{% endfor %}</tbody></table></div>
+      </div>
+      <div class="stats-grid" id="admin-metrics" style="margin-top:16px">
+        <button class="mini-card nav-action" type="button" data-target="people-summary-panel"><span>{{ school_settings.learner_label }}s</span><strong>{{ summary.total_students }}</strong><small class="muted">Open people summary</small></button>
+        <button class="mini-card nav-action" type="button" data-target="people-summary-panel"><span>Active learners</span><strong>{{ summary.active_students }}</strong><small class="muted">View by class / grade</small></button>
+        <button class="mini-card nav-action" type="button" data-target="finance-summary-panel" data-focus="paid"><span>Paid accounts</span><strong>{{ summary.paid_students }}</strong><small class="muted">Open paid list</small></button>
+        <button class="mini-card nav-action" type="button" data-target="finance-summary-panel" data-focus="partial"><span>Fee follow-up</span><strong>{{ summary.pending_students }}</strong><small class="muted">Open balances</small></button>
+        <button class="mini-card nav-action" type="button" data-target="finance-summary-panel"><span>Collections</span><strong>KES {{ "{:,.0f}".format(summary.total_income or 0) }}</strong><small class="muted">Payments & income</small></button>
+        <button class="mini-card nav-action" type="button" data-target="finance-summary-panel"><span>Outstanding</span><strong>KES {{ "{:,.0f}".format(summary.total_balance or 0) }}</strong><small class="muted">Paid / partial / unpaid</small></button>
+      </div>
+    </section>
+
+    <section id="finance-summary-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Finance summary</div><h3>Money position at a glance</h3><p class="muted">Every summary tile opens a real list. Paid learners rise to the top; partial balances sit in the orange zone; unpaid balances sit below them.</p></div><a class="btn btn-ghost mini" href="/finance-dashboard">Open Finance workspace</a></div>
+      <div class="stats-grid" style="margin-bottom:16px"><div class="mini-card"><span>Fully paid</span><strong>{{payment_paid_rows|length}}</strong></div><div class="mini-card"><span>Partially paid</span><strong>{{payment_partial_rows|length}}</strong></div><div class="mini-card"><span>Unpaid / full balance</span><strong>{{payment_unpaid_rows|length}}</strong></div><div class="mini-card"><span>Outstanding</span><strong>KES {{"{:,.0f}".format(summary.total_balance or 0)}}</strong></div></div>
+      <div style="border-top:4px solid #1f9d67;padding-top:10px;margin-top:14px"><h4>Fully paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_paid_rows %}<tr><td><span class="status-pill">Paid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No fully paid learners yet.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div style="border-top:4px solid #e48b21;padding-top:10px;margin-top:18px"><h4>Partially paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_partial_rows %}<tr><td><span class="status-pill">Partial</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No partial balances in the current fee setup.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div style="border-top:4px solid #c43b3b;padding-top:10px;margin-top:18px"><h4>Unpaid / full balance</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_unpaid_rows %}<tr><td><span class="status-pill">Unpaid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No full outstanding balances.</td></tr>{% endfor %}</tbody></table></div></div>
+    </section>
+
+    <section id="people-summary-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">People summary</div><h3>People, classes and workforce</h3><p class="muted">Open one view and know how the institution is distributed across grades and staff functions.</p></div><div class="quick-actions"><a class="btn btn-ghost mini" href="/admin/learners">All learners</a><a class="btn btn-ghost mini" href="/admin/employees">All employees</a><a class="btn btn-primary mini" href="/allocate">Allocate</a><a class="btn btn-ghost mini" href="/export/students">Download learners</a></div></div>
+      <div class="table-wrap" style="margin-bottom:16px"><table><thead><tr><th>Class / grade</th><th>Learners</th><th>Paid</th><th>Owing</th></tr></thead><tbody>{% for r in grade_people %}<tr><td>{{r.grade}}</td><td>{{r.c}}</td><td>{{r.paid}}</td><td>{{r.owing}}</td></tr>{% else %}<tr><td colspan="4" class="muted">No learner classes yet.</td></tr>{% endfor %}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>People type</th><th>Active accounts</th></tr></thead><tbody>{% for r in staff_breakdown %}<tr><td>{{r.role}}</td><td>{{r.c}}</td></tr>{% else %}<tr><td colspan="2" class="muted">No active staff accounts yet.</td></tr>{% endfor %}</tbody></table></div>
+    </section>
+
+    <section id="exam-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Examinations</div>
+          <h3>Compiled school grades by level</h3>
+        </div>
+      </div>
+      <div class="stats-grid" id="school-exam-summary" style="margin-bottom:16px">
+        <div class="mini-card"><span>Submissions</span><strong>{{ exam_school_summary.batches }}</strong></div>
+        <div class="mini-card"><span>Results</span><strong>{{ exam_school_summary.results }}</strong></div>
+        <div class="mini-card"><span>School mean</span><strong>{{ "{:,.1f}".format(exam_school_summary.mean or 0) }}</strong></div>
+        <div class="mini-card"><span>Best mark</span><strong>{{ "{:,.1f}".format(exam_school_summary.best or 0) }}</strong></div>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:16px">
+        <table>
+          <thead><tr><th>Grade</th><th>Pupils</th><th>Subjects</th><th>Batches</th><th>Mean</th><th>Highest</th><th>Lowest</th></tr></thead>
+          <tbody>
+            {% for row in exam_grade_summary %}
+              <tr>
+                <td>{{ row.grade }}</td>
+                <td>{{ row.pupils }}</td>
+                <td>{{ row.subjects }}</td>
+                <td>{{ row.batches }}</td>
+                <td>{{ "{:,.1f}".format(row.mean_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.highest_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.lowest_score or 0) }}</td>
+              </tr>
+            {% endfor %}
+            {% if not exam_grade_summary %}
+              <tr><td colspan="7" class="muted">No grades have been compiled yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:16px">
+        <table>
+          <thead><tr><th>Grade</th><th>Term</th><th>Pupils</th><th>Subjects</th><th>Mean</th><th>Highest</th><th>Lowest</th></tr></thead>
+          <tbody>
+            {% for row in exam_term_summary %}
+              <tr>
+                <td>{{ row.grade }}</td>
+                <td>{{ row.term }}</td>
+                <td>{{ row.pupils }}</td>
+                <td>{{ row.subjects }}</td>
+                <td>{{ "{:,.1f}".format(row.mean_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.highest_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.lowest_score or 0) }}</td>
+              </tr>
+            {% endfor %}
+            {% if not exam_term_summary %}
+              <tr><td colspan="7" class="muted">No term results yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:16px">
+        <table>
+          <thead><tr><th>Subject</th><th>Entries</th><th>Mean</th><th>Highest</th><th>Lowest</th></tr></thead>
+          <tbody>
+            {% for row in exam_subject_summary %}
+              <tr>
+                <td>{{ row.subject }}</td>
+                <td>{{ row.entries }}</td>
+                <td>{{ "{:,.1f}".format(row.mean_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.highest_score or 0) }}</td>
+                <td>{{ "{:,.1f}".format(row.lowest_score or 0) }}</td>
+              </tr>
+            {% endfor %}
+            {% if not exam_subject_summary %}
+              <tr><td colspan="5" class="muted">No subject analysis yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Submitted</th><th>Grade</th><th>Term</th><th>Entries</th><th>Mean</th><th>By</th></tr></thead>
+          <tbody>
+            {% for batch in recent_exam_batches %}
+              <tr>
+                <td>{{ batch.created_at[:16] }}</td>
+                <td>{{ batch.grade }}</td>
+                <td>{{ batch.term }}</td>
+                <td>{{ batch.entries }}</td>
+                <td>{{ "{:,.1f}".format(batch.mean_mark or 0) }}</td>
+                <td>{{ batch.submitted_by_name }}</td>
+              </tr>
+            {% endfor %}
+            {% if not recent_exam_batches %}
+              <tr><td colspan="6" class="muted">No submissions have been received yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="students-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Pupil controls</div>
+          <h3>Delete pupils and review records</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Admission No.</th><th>Grade</th><th>Status</th><th>Balance</th><th>Action</th></tr></thead>
+          <tbody>
+            {% for s in students %}
+            <tr>
+              <td>{{ s.full_name }}</td>
+              <td>{{ s.admission_no }}</td>
+              <td>{{ s.grade }}</td>
+              <td><span class="pill {{ s.payment_status|lower }}">{{ s.payment_status }}</span></td>
+              <td>{{ school_settings.currency_code }} {{ "{:,.0f}".format(s.balance or 0) }}</td>
+              <td><div class="quick-actions">
+                <a class="btn btn-ghost mini" href="{{ url_for('student_profile', student_id=s.id) }}">View</a>
+                <a class="btn btn-ghost mini" href="{{ url_for('student_profile', student_id=s.id) }}#edit">Edit</a>
+                <form method="post" action="{{ url_for('delete_student', student_id=s.id) }}" onsubmit="return confirm('Delete this pupil? This will remove the pupil record and linked payments.');">
+                  <button class="btn btn-ghost mini" type="submit">Delete</button>
+                </form></div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="finance-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Finance</div><h3>Income, deductions, and balances</h3></div></div>
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="mini-card"><span>Available balance</span><strong>KES {{ "{:,.0f}".format(summary.total_income or 0) }}</strong></div>
+        <div class="mini-card"><span>Average pupil balance</span><strong>KES {{ "{:,.0f}".format(summary.avg_balance or 0) }}</strong></div>
+        <div class="mini-card"><span>Pending fees</span><strong>{{ summary.pending_students }}</strong></div>
+        <div class="mini-card"><span>Employees</span><strong>{{ users|length }}</strong></div>
+      </div>
+      <div id="expense-ledger" class="mini-card">
+        <span>Expense ledger</span>
+        <strong>Teachers, utilities, rent, and operations</strong>
+        <div class="muted">This is the place to track deductions and accountability items.</div>
+      </div>
+    </section>
+
+    <section id="analytics-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Analytics</div><h3>Graphs and category breakdowns</h3></div></div>
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="mini-card"><span>Paid students</span><strong>{{ summary.paid_students }}</strong></div>
+        <div class="mini-card"><span>Pending students</span><strong>{{ summary.pending_students }}</strong></div>
+        <div class="mini-card"><span>Income</span><strong>KES {{ "{:,.0f}".format(summary.total_income or 0) }}</strong></div>
+        <div class="mini-card"><span>Balance</span><strong>KES {{ "{:,.0f}".format(summary.total_balance or 0) }}</strong></div>
+      </div>
+      <div id="admin-category-breakdown" class="detail-card">
+        <h4>Category breakdowns</h4>
+        <div class="detail-lines">
+          <div><span>Students by grade</span><strong>{{ categories.students|length }} groups</strong></div>
+          <div><span>Employees by role</span><strong>{{ categories.employees|length }} groups</strong></div>
+          <div><span>Payments by method</span><strong>{{ categories.payments|length }} groups</strong></div>
+        </div>
+
+      </div>
+    </section>
+
+    <section id="exports-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Exports</div><h3>Download clean records</h3><p class="muted">Choose a record once, then the format you need.</p></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Record</th><th>CSV</th><th>Word</th><th>PDF</th></tr></thead><tbody>
+      <tr><td>Students</td><td><a class="btn btn-ghost mini" href="/export/students/csv">CSV</a></td><td><a class="btn btn-ghost mini" href="/export/students/docx">Word</a></td><td><a class="btn btn-ghost mini" href="/export/students/pdf">PDF</a></td></tr>
+      <tr><td>Employees</td><td><a class="btn btn-ghost mini" href="/export/employees/csv">CSV</a></td><td><a class="btn btn-ghost mini" href="/export/employees/docx">Word</a></td><td><a class="btn btn-ghost mini" href="/export/employees/pdf">PDF</a></td></tr>
+      <tr><td>Attendance</td><td><a class="btn btn-ghost mini" href="/export/attendance/csv">CSV</a></td><td><a class="btn btn-ghost mini" href="/export/attendance/docx">Word</a></td><td><a class="btn btn-ghost mini" href="/export/attendance/pdf">PDF</a></td></tr>
+      </tbody></table></div></section>
+<section id="backup-quick" class="panel glass" style="margin-top:14px"><div class="panel-head"><div><div class="eyebrow">Backup & restore</div><h3>One recovery workspace</h3><p class="muted">Full JSON preserves records/settings/assets. SQLite is the fast database rollback copy.</p></div></div><div class="quick-actions"><a class="btn btn-primary" href="/backup/json">Full JSON backup</a><a class="btn btn-ghost" href="/backup/download">SQLite backup</a><span class="muted small">Use the Backup & restore panel below to restore either file type.</span></div></section>
+<section id="backup-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Backup</div><h3>Restore and protect the site</h3></div></div>
+      <div class="detail-card" style="margin-bottom:16px">
+        <h4>Download backup</h4>
+        <p class="muted">Keep a full copy so the school can be restored after any crash.</p>
+        <a class="btn btn-primary" href="{{ url_for('backup_download') }}">Download backup</a>
+      </div>
+      <div class="detail-card">
+        <h4>Restore backup</h4>
+        <form class="stack-form" method="post" action="{{ url_for('backup_restore') }}" enctype="multipart/form-data">
+          <label><span>Backup file</span><input type="file" name="backup_file" accept=".db,.sqlite,.sqlite3,.json" required></label>
+          <button class="btn btn-primary" type="submit">Restore backup</button>
+        </form>
+      </div>
+    </section>
+<section class="panel glass" id="theme-advert-panel"><div class="panel-head"><div><div class="eyebrow">Experience & communication</div><h3>Theme and school adverts</h3></div></div><div class="quick-actions" style="margin-bottom:12px"><form method="post" action="/admin/theme/preset" class="quick-actions"><select name="theme_preset" style="min-width:220px"><option value="classic" {% if settings.theme_preset=='classic' %}selected{% endif %}>Classic</option><option value="christmas" {% if settings.theme_preset=='christmas' %}selected{% endif %}>Christmas</option><option value="easter" {% if settings.theme_preset=='easter' %}selected{% endif %}>Easter</option><option value="madaraka" {% if settings.theme_preset=='madaraka' %}selected{% endif %}>Madaraka</option><option value="school-pride" {% if settings.theme_preset=='school-pride' %}selected{% endif %}>School pride</option></select><button class="btn btn-primary" type="submit">Apply theme</button></form></div><form method="post" action="/advertisements/create" class="stack-form two-col"><label><span>Advert title</span><input name="title" required></label><label><span>Priority</span><input name="priority" type="number" min="0" max="100" value="10"></label><label style="grid-column:1/-1"><span>Message</span><textarea name="body" rows="3" required></textarea></label><label><span>Start date</span><input name="start_date" type="date"></label><label><span>End date</span><input name="end_date" type="date"></label><label><span>Optional link</span><input name="link_url" type="url"></label><div><span>&nbsp;</span><button class="btn btn-primary" type="submit">Publish advert</button></div></form></section>
+<section id="institution-profile-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Institution configuration</div><h3>Configure the platform around the institution</h3><p class="muted">Terminology is configurable; the underlying security model stays consistent.</p></div></div>
+      <form method="post" action="{{ url_for('admin_institution_profile') }}" class="stack-form two-col">
+        <label><span>Institution type</span><select name="institution_type">{% for value in institution_types %}<option value="{{ value }}" {% if value==school_settings.institution_type %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Learner label</span><input name="learner_label" value="{{ school_settings.learner_label }}" placeholder="Student / Pupil / Learner"></label>
+        <label><span>Staff label</span><input name="staff_label" value="{{ school_settings.staff_label }}" placeholder="Teacher / Lecturer / Staff"></label>
+        <label><span>Academic period label</span><input name="academic_period_label" value="{{ school_settings.academic_period_label }}" placeholder="Term / Semester"></label>
+        <label><span>Class label</span><input name="class_label" value="{{ school_settings.class_label }}" placeholder="Class / Cohort"></label>
+        <label><span>Department label</span><input name="department_label" value="{{ school_settings.department_label }}" placeholder="Department / School / Faculty"></label>
+        <label class="toggle-line"><input type="checkbox" name="parent_portal_enabled" value="1" {% if school_settings.parent_portal_enabled %}checked{% endif %}> Enable parent/guardian portal for this institution</label><div style="grid-column:1/-1" class="detail-card"><strong>College / TVET provisioning</strong><p class="muted">Choosing TVET, College, University or Mixed Institution automatically makes Communications and Computer Studies available as base departments.</p></div>
+        <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save institution configuration</button></div>
+      </form>
+    </section>
+
+<section id="public-info-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Before-login experience</div><h3>Public information & access</h3></div></div>
+      <p class="muted">Choose what visitors can see before logging in, and choose whether school users must authenticate.</p>
+      <form method="post" action="{{ url_for('admin_public_settings') }}" class="stack-form">
+        <p class="muted tiny">Login-page access is controlled from <strong>Users → Login Page Access</strong>. This page controls only the information visitors can see before login.</p>
+        <div class="two-col">
+          <label><span>School owners / management</span><textarea name="institution_owners" rows="3">{{ settings.institution_owners }}</textarea></label>
+          <label><span>Developer name</span><input name="developer_name" value="{{ settings.developer_name }}"></label>
+          <label><span>Developer information</span><textarea name="developer_about" rows="3">{{ settings.developer_about }}</textarea></label>
+          <label><span>Company name</span><input name="company_name" value="{{ settings.company_name }}"></label>
+          <label><span>Company information</span><textarea name="company_about" rows="3">{{ settings.company_about }}</textarea></label><label style="grid-column:1/-1"><span>Public hero title</span><input name="landing_hero_title" value="{{ settings.landing_hero_title }}" placeholder="Welcome to our school"></label><label style="grid-column:1/-1"><span>Public hero message</span><textarea name="landing_hero_text" rows="3" placeholder="The message visitors see first.">{{ settings.landing_hero_text }}</textarea></label><label><span>Primary button label</span><input name="landing_cta_primary" value="{{ settings.landing_cta_primary }}"></label><label><span>Secondary button label</span><input name="landing_cta_secondary" value="{{ settings.landing_cta_secondary }}"></label><label style="grid-column:1/-1"><span>Public announcement</span><input name="landing_announcement" value="{{ settings.landing_announcement }}" placeholder="Admissions open · Term begins Monday"></label><label style="grid-column:1/-1"><span>Public contact / enquiries</span><textarea name="landing_contact" rows="2" placeholder="Phone · email · office hours">{{ settings.landing_contact }}</textarea></label><div class="toggle-grid" style="grid-column:1/-1"><label class="toggle-line"><input type="checkbox" name="landing_show_dates" value="1" {% if settings.landing_show_dates %}checked{% endif %}> Show important dates</label><label class="toggle-line"><input type="checkbox" name="landing_show_gallery" value="1" {% if settings.landing_show_gallery %}checked{% endif %}> Show image gallery</label><label class="toggle-line"><input type="checkbox" name="landing_show_roles" value="1" {% if settings.landing_show_roles %}checked{% endif %}> Show role cards</label></div>
+          <label><span>School history</span><textarea name="institution_history" rows="3">{{ settings.institution_history }}</textarea></label>
+          <label><span>Achievements / performance</span><textarea name="institution_performance" rows="3">{{ settings.institution_performance }}</textarea></label>
+          <label><span>Religion / values</span><textarea name="institution_religion" rows="3">{{ settings.institution_religion }}</textarea></label>
+          <label><span>Affiliated schools</span><textarea name="institution_affiliations" rows="3">{{ settings.institution_affiliations }}</textarea></label>
+          <label><span>How to use the portal</span><textarea name="institution_help" rows="3">{{ settings.institution_help }}</textarea></label>
+          <label><span>Who to contact</span><textarea name="institution_contact" rows="3">{{ settings.institution_contact }}</textarea></label>
+        </div>
+        <div class="toggle-grid">
+          <label class="toggle-line"><input type="checkbox" name="show_institution" {% if 'institution' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> Institution overview</label>
+          <label class="toggle-line"><input type="checkbox" name="show_history" {% if 'history' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> History</label>
+          <label class="toggle-line"><input type="checkbox" name="show_achievements" {% if 'achievements' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> Achievements</label>
+          <label class="toggle-line"><input type="checkbox" name="show_owners" {% if 'owners' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> Owners</label>
+          <label class="toggle-line"><input type="checkbox" name="show_developer" {% if 'developer' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> Developer</label>
+          <label class="toggle-line"><input type="checkbox" name="show_company" {% if 'company' in (settings.prelogin_sections or '').split(',') %}checked{% endif %}> Company</label>
+        </div>
+        <button class="btn btn-primary" type="submit">Save public page settings</button>
+      </form>
+    </section>
+
+    <section id="audit-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Audit</div><h3>Recent activity log</h3></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead>
+          <tbody>
+            {% for row in audits %}
+            <tr><td>{{ row.created_at[:16] }}</td><td>{{ row.actor_name }}</td><td>{{ row.action }}</td><td>{{ row.details }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="public-face-panel" class="panel glass workspace-panel hidden"><div class="panel-head"><div><div class="eyebrow">Public landing page</div><h3>Landing page design</h3></div></div><p class="muted">These controls affect only the public welcome page shown before a user chooses Teacher, Student or Parent. They do not recolour logged-in workspaces.</p><div class="mini-card" style="margin:12px 0"><strong>What each colour controls</strong><div class="muted small" style="margin-top:6px"><b>Background</b> = the page canvas. <b>Panels</b> = cards and containers. <b>Text</b> = main landing-page typography. <b>Accent</b> = buttons, links and highlighted controls. Changes preview on the public landing page only; logged-in workspaces keep their own role styling.</div></div><form method="post" action="/ict/landing-branding" enctype="multipart/form-data" class="stack-form two-col"><label><span>Background</span><input type="color" name="landing_background_color" value="{{school_settings.landing_background_color}}"></label><label><span>Panels</span><input type="color" name="landing_panel_color" value="{{school_settings.landing_panel_color}}"></label><label><span>Text</span><input type="color" name="landing_text_color" value="{{school_settings.landing_text_color}}"></label><label><span>Accent</span><input type="color" name="landing_accent_color" value="{{school_settings.landing_accent_color}}"></label><label><span>Body font</span><select name="landing_font_family"><option {% if school_settings.landing_font_family=='Inter' %}selected{% endif %}>Inter</option><option {% if school_settings.landing_font_family=='Manrope' %}selected{% endif %}>Manrope</option><option {% if school_settings.landing_font_family=='DM Sans' %}selected{% endif %}>DM Sans</option><option {% if school_settings.landing_font_family=='Plus Jakarta Sans' %}selected{% endif %}>Plus Jakarta Sans</option><option {% if school_settings.landing_font_family=='IBM Plex Sans' %}selected{% endif %}>IBM Plex Sans</option><option {% if school_settings.landing_font_family=='Roboto' %}selected{% endif %}>Roboto</option><option {% if school_settings.landing_font_family=='Noto Sans' %}selected{% endif %}>Noto Sans</option></select></label><label><span>Heading font</span><select name="landing_heading_font"><option {% if school_settings.landing_heading_font=='Manrope' %}selected{% endif %}>Manrope</option><option {% if school_settings.landing_heading_font=='Inter' %}selected{% endif %}>Inter</option><option {% if school_settings.landing_heading_font=='Plus Jakarta Sans' %}selected{% endif %}>Plus Jakarta Sans</option><option {% if school_settings.landing_heading_font=='Merriweather' %}selected{% endif %}>Merriweather</option><option {% if school_settings.landing_heading_font=='Source Serif 4' %}selected{% endif %}>Source Serif 4</option></select></label><label><span>Content width</span><input type="number" name="landing_content_width" min="900" max="1600" value="{{school_settings.landing_content_width or 1240}}"></label><label><span>Hero layout</span><select name="landing_hero_layout"><option value="split" {% if school_settings.landing_hero_layout=='split' %}selected{% endif %}>Split / wide</option><option value="stacked" {% if school_settings.landing_hero_layout=='stacked' %}selected{% endif %}>Stacked</option></select></label><label><span>Role cards per row</span><select name="landing_role_columns"><option value="1" {% if school_settings.landing_role_columns==1 %}selected{% endif %}>1</option><option value="2" {% if school_settings.landing_role_columns==2 %}selected{% endif %}>2</option><option value="3" {% if school_settings.landing_role_columns==3 %}selected{% endif %}>3</option></select></label><label><span>Landing background image</span><input type="file" name="landing_background" accept=".png,.jpg,.jpeg,.webp"></label><label><span>History image 1</span><input type="file" name="institution_image_1" accept=".png,.jpg,.jpeg,.webp"></label><label><span>Image 1 position</span><input name="institution_image_1_position" value="{{school_settings.institution_image_1_position}}"></label><label><span>History image 2</span><input type="file" name="institution_image_2" accept=".png,.jpg,.jpeg,.webp"></label><label><span>Image 2 position</span><input name="institution_image_2_position" value="{{school_settings.institution_image_2_position}}"></label><label><span>History image 3</span><input type="file" name="institution_image_3" accept=".png,.jpg,.jpeg,.webp"></label><label><span>Image 3 position</span><input name="institution_image_3_position" value="{{school_settings.institution_image_3_position}}"></label><button class="btn btn-primary" type="submit">Save landing page design</button></form><div class="restore-controls"><form method="post" action="/admin/theme/restore/landing" onsubmit="return confirm('Restore the previous landing-page design?')"><button class="btn btn-ghost mini" type="submit">↶ Restore previous landing design</button></form><span class="muted">A restore point is captured automatically before each landing design change.</span></div></section><section id="settings-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">School settings</div><h3>Branding, admission rules, and fee setup</h3></div></div>
+      <form class="stack-form two-col" method="post" action="{{ url_for('save_settings') }}">
+        <label><span>School name</span><input name="school_name" value="{{ school_settings.school_name }}"></label>
+        <label><span>Currency code</span><input name="currency_code" value="{{ school_settings.currency_code }}"></label>
+        <label><span>Admission prefix</span><input name="admission_prefix" value="{{ school_settings.admission_prefix }}"></label>
+        <label><span>Admission suffix</span><input name="admission_suffix" value="{{ school_settings.admission_suffix }}"></label>
+        <label><span>Student name prefix</span><input name="student_name_prefix" value="{{ school_settings.student_name_prefix }}"></label>
+        <label><span>Student name suffix</span><input name="student_name_suffix" value="{{ school_settings.student_name_suffix }}"></label>
+        <label style="grid-column:1/-1"><span>School fees</span><input name="school_fee" type="number" step="0.01" min="0" value="{{ school_settings.school_fee or 0 }}"></label>
+        <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save settings</button></div>
+      </form>
+      <div class="settings-media-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+        <form class="detail-card" method="post" action="/ict/logo" enctype="multipart/form-data"><div class="eyebrow">School identity</div><h4>Logo</h4><p class="muted small">Upload the school logo used across the portal.</p><input type="file" name="logo" accept=".png,.jpg,.jpeg,.webp,.svg" required><button class="btn btn-ghost mini" type="submit" style="margin-top:8px">Upload logo</button></form>
+        <form class="detail-card" method="post" action="/ict/background" enctype="multipart/form-data"><div class="eyebrow">Logged-in appearance</div><h4>PC / phone background</h4><p class="muted small">Use one controlled background image for the logged-in portal. Public landing images stay separate.</p><input type="file" name="background" accept=".png,.jpg,.jpeg,.webp" required><button class="btn btn-ghost mini" type="submit" style="margin-top:8px">Upload background</button></form>
+      </div>
+    </section>
+
+    <section class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">Recent records</div><h3>Payments and pupils</h3></div></div>
+      <div class="table-wrap" style="margin-bottom:18px">
+        <table>
+          <thead><tr><th>Date</th><th>Admission No.</th><th>Pupil</th><th>Amount</th><th>Method</th><th>By</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for p in payments %}
+            <tr><td>{{ p.created_at[:16] }}</td><td>{{ p.admission_no }}</td><td>{{ p.student_name }}</td><td>KES {{ "{:,.0f}".format(p.amount or 0) }}</td><td>{{ p.method }}</td><td>{{ p.recorded_by_name }}</td><td><span class="pill {{ p.status|lower }}">{{ p.status }}</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Admission No.</th><th>Grade</th><th>Status</th><th>Balance</th></tr></thead>
+          <tbody>
+            {% for s in students %}
+            <tr><td>{{ s.full_name }}</td><td>{{ s.admission_no }}</td><td>{{ s.grade }}</td><td>{{ s.payment_status }}</td><td>KES {{ "{:,.0f}".format(s.balance or 0) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  <section id="admin-add-student" class="panel glass workspace-panel" style="margin-top:14px"><div class="panel-head"><div><div class="eyebrow">Academics · Learner intake</div><h3>Add student</h3><p class="muted">Single administrator-only learner intake. Full name and class are the only required fields; everything else can be completed later.</p></div><span class="feature-badge">Admin</span></div><form method="post" action="/admin/students/add" class="stack-form two-col"><label><span>Admission No.</span><input name="admission_no" placeholder="Auto-generated if blank"></label><label><span>Full name</span><input name="full_name" required></label><label><span>Grade / Class</span><input name="grade" list="grade-options" placeholder="Grade 8" required></label><datalist id="grade-options"><option value="Grade 1"><option value="Grade 2"><option value="Grade 3"><option value="Grade 4"><option value="Grade 5"><option value="Grade 6"><option value="Grade 7"><option value="Grade 8"><option value="Grade 9"><option value="Grade 10"><option value="Grade 11"><option value="Grade 12"></datalist><label><span>Age</span><input name="age" inputmode="numeric" placeholder="e.g. 14"></label><label><span>Student phone</span><input name="student_phone"></label><label><span>Student email</span><input type="email" name="student_email"></label><label><span>Guardian name</span><input name="guardian_name"></label><label><span>Guardian phone</span><input name="guardian_phone"></label><label><span>Guardian email</span><input type="email" name="guardian_email"></label><label><span>Health / medical condition</span><input name="medical_condition"></label><label><span>Allergies</span><input name="allergies"></label><label><span>Other accountability / support details</span><input name="special_info"></label><label style="grid-column:1/-1"><span>Notes</span><textarea name="notes" rows="3"></textarea></label><div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Add student</button></div></form><div class="detail-card" style="margin-top:18px"><div class="panel-head"><div><div class="eyebrow">Parent / guardian</div><h4>Add parent</h4><p class="muted">Select one or more existing students. Parent portal access is optional.</p></div></div><form method="post" action="/admin/parent/add" class="stack-form two-col"><label style="grid-column:1/-1"><span>Students</span><div class="quick-actions" style="flex-wrap:wrap;max-height:220px;overflow:auto">{% for st in onboarding_students %}<label class="mini-card"><input type="checkbox" name="student_ids" value="{{st.id}}"> <strong>{{st.full_name}}</strong><span class="muted">{{st.admission_no}} · {{st.grade}}</span></label>{% else %}<span class="muted">Add a student first.</span>{% endfor %}</div></label><label><span>Parent / guardian name</span><input name="parent_full_name" required></label><label><span>Phone</span><input name="parent_phone"></label><label><span>Email</span><input type="email" name="parent_email"></label><label><span>Relationship</span><input name="relationship" value="Parent / Guardian"></label><label><span>Password</span><input type="password" name="parent_password" minlength="4"></label><label class="toggle-line"><input type="checkbox" name="enable_parent_portal" checked> Enable parent portal login</label><div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save parent</button></div></form></div></section>
+<section class="panel glass" style="margin-top:14px"><div class="eyebrow">AI control</div><h3>AI configuration</h3><form method="post" action="/admin/ai-settings" class="stack-form two-col"><label><span>Enable AI</span><input type="checkbox" name="ai_enabled" {% if settings.ai_enabled %}checked{% endif %}></label><label><span>API version</span><select name="ai_provider"><option value="openai_responses" {% if settings.ai_provider=='openai_responses' %}selected{% endif %}>OpenAI Responses API</option><option value="openai_chat_completions" {% if settings.ai_provider=='openai_chat_completions' %}selected{% endif %}>OpenAI Chat Completions API</option></select></label><label><span>Model</span><input name="ai_model" value="{{settings.ai_model or 'gpt-5.6'}}"></label><div><span>API key</span><strong>Server environment only</strong><small class="muted">Set OPENAI_API_KEY in deployment secrets; never place it in HTML or database.</small></div><div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save AI settings</button></div></form></section><section class="panel glass" style="margin-top:14px"><div class="eyebrow">Advanced theme engine</div><h3>Rebrand the whole interface</h3><p class="muted">Admin can change colors, typography, density and component shape so the platform can look nothing like the default design.</p><form method="post" action="/admin/theme" class="stack-form two-col"><input type="hidden" name="school_name" value="{{settings.school_name}}"><input type="hidden" name="portal_subtitle" value="{{settings.portal_subtitle}}"><label><span>Primary</span><input type="color" name="primary_color" value="{{settings.primary_color}}"></label><label><span>Accent</span><input type="color" name="accent_color" value="{{settings.accent_color}}"></label><label><span>Background</span><input type="color" name="background_color" value="{{settings.background_color}}"></label><label><span>Panel</span><input type="color" name="panel_color" value="{{settings.panel_color}}"></label><label><span>Sidebar</span><input type="color" name="sidebar_color" value="{{settings.sidebar_color}}"></label><label><span>Header</span><input type="color" name="header_color" value="{{settings.header_color}}"></label><label><span>Text</span><input type="color" name="text_color" value="{{settings.text_color}}"></label><label><span>Muted text</span><input type="color" name="muted_text_color" value="{{settings.muted_text_color}}"></label><label><span>Body font</span><select name="font_family"><option {% if settings.font_family=='Inter' %}selected{% endif %}>Inter</option><option {% if settings.font_family=='Manrope' %}selected{% endif %}>Manrope</option><option {% if settings.font_family=='DM Sans' %}selected{% endif %}>DM Sans</option><option {% if settings.font_family=='Plus Jakarta Sans' %}selected{% endif %}>Plus Jakarta Sans</option><option {% if settings.font_family=='IBM Plex Sans' %}selected{% endif %}>IBM Plex Sans</option><option {% if settings.font_family=='Roboto' %}selected{% endif %}>Roboto</option><option {% if settings.font_family=='Noto Sans' %}selected{% endif %}>Noto Sans</option></select></label><label><span>Heading font</span><select name="heading_font"><option {% if settings.heading_font=='Inter' %}selected{% endif %}>Inter</option><option {% if settings.heading_font=='Manrope' %}selected{% endif %}>Manrope</option><option {% if settings.heading_font=='Merriweather' %}selected{% endif %}>Merriweather</option><option {% if settings.heading_font=='Source Serif 4' %}selected{% endif %}>Source Serif 4</option><option {% if settings.heading_font=='Plus Jakarta Sans' %}selected{% endif %}>Plus Jakarta Sans</option></select></label><label><span>Theme mode</span><select name="theme_mode"><option value="dark" {% if settings.theme_mode=='dark' %}selected{% endif %}>Dark</option><option value="light" {% if settings.theme_mode=='light' %}selected{% endif %}>Light</option><option value="system" {% if settings.theme_mode=='system' %}selected{% endif %}>System</option></select></label><label><span>Desktop sidebar position (PC only)</span><select name="sidebar_style"><option value="drawer" {% if settings.sidebar_style=='drawer' %}selected{% endif %}>Left / collapsible drawer (PC)</option><option value="top" {% if settings.sidebar_style=='top' %}selected{% endif %}>Top navigation (PC)</option><option value="hover" {% if settings.sidebar_style=='hover' %}selected{% endif %}>Hover-expand rail (PC)</option></select></label><label><span>Corner radius</span><input type="number" min="4" max="28" name="radius_px" value="{{settings.radius_px or 12}}"></label><label><span>Button radius</span><input type="number" min="4" max="28" name="button_radius_px" value="{{settings.button_radius_px or 10}}"></label><label style="grid-column:1/-1"><span>Custom CSS (admin only)</span><textarea name="custom_css" rows="5" placeholder="Optional safe visual overrides">{{settings.custom_css}}</textarea></label><label style="grid-column:1/-1"><span>Navigation order</span><input name="menu_order" value="{{settings.menu_order}}"></label><div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Apply complete theme</button></div></form><div class="restore-controls"><form method="post" action="/admin/theme/restore/workspace" onsubmit="return confirm('Restore the previous workspace theme?')"><button class="btn btn-ghost mini" type="submit">↶ Restore previous workspace setting</button></form><span class="muted">A restore point is captured automatically before each theme change.</span></div></section><section class="panel glass" style="margin-top:14px"><div class="eyebrow">Finance handovers</div><h3>Submitted finance days</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Submitted by</th><th>Status</th><th>Notes</th></tr></thead><tbody>{% for c in finance_closings %}<tr><td>{{c.closing_date}}</td><td>{{c.submitted_name}}</td><td>{{c.status}}</td><td>{{c.notes or "—"}}</td></tr>{% else %}<tr><td colspan="4" class="muted">No finance handovers yet.</td></tr>{% endfor %}</tbody></table></div></section></main>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+
+<script>
+(function(){
+  const modal=document.getElementById('loginAccessModal');
+  const open=document.getElementById('openLoginAccess');
+  const close=document.getElementById('closeLoginAccess');
+  const cancel=document.getElementById('cancelLoginAccess');
+  const confirmStep=document.getElementById('loginAccessStepConfirm');
+  const passwordStep=document.getElementById('loginAccessStepPassword');
+  const continueBtn=document.getElementById('continueLoginAccess');
+  const backBtn=document.getElementById('backLoginAccess');
+  if(!modal) return;
+  const reset=()=>{confirmStep?.classList.remove('hidden');passwordStep?.classList.add('hidden');const pw=document.getElementById('loginAccessPassword');if(pw) pw.value='';};
+  const hide=()=>{modal.classList.add('hidden');document.body.classList.remove('modal-open');reset();};
+  const show=()=>{reset();modal.classList.remove('hidden');document.body.classList.add('modal-open');};
+  open?.addEventListener('click',show);
+  close?.addEventListener('click',hide);
+  cancel?.addEventListener('click',hide);
+  continueBtn?.addEventListener('click',()=>{confirmStep?.classList.add('hidden');passwordStep?.classList.remove('hidden');setTimeout(()=>document.getElementById('loginAccessPassword')?.focus(),50);});
+  backBtn?.addEventListener('click',()=>{passwordStep?.classList.add('hidden');confirmStep?.classList.remove('hidden');});
+  modal.addEventListener('click',e=>{if(e.target===modal) hide();});
+})();
+</script>
+<script>
+(function(){
+  const search=document.getElementById('peopleSearch'), role=document.getElementById('peopleRoleFilter'), state=document.getElementById('peopleStateFilter'), table=document.getElementById('peopleTable');
+  function filterPeople(){ if(!table)return; const q=(search?.value||'').toLowerCase(), r=role?.value||'', st=state?.value||''; table.querySelectorAll('tbody tr').forEach(tr=>{const okq=!q||(tr.dataset.person||'').includes(q), okr=!r||tr.dataset.role===r, oks=!st||tr.dataset.state===st; tr.style.display=(okq&&okr&&oks)?'':'none';}); }
+  [search,role,state].forEach(x=>x&&x.addEventListener('input',filterPeople));
+  document.getElementById('scrollCreateUser')?.addEventListener('click',()=>document.getElementById('create-user-card')?.scrollIntoView({behavior:'smooth',block:'start'}));
+})();
+</script>
+{% include '_footer.html' %}</body>
+</html>

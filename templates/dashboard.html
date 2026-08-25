@@ -1,0 +1,603 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ school_settings.school_name }} | User Dashboard</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="{{ theme_color }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>{{theme_style|safe}}{{theme_preset_style|safe}}</style></head>
+<body class="app-body sidebar-style-{{ school_settings.sidebar_style|default("drawer", true) }}">{% include "_notification_bell.html" %}
+  <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+  <div class="scroll-rail" id="scrollRail" aria-hidden="true"><div class="scroll-track"><div class="scroll-thumb" id="scrollThumb"></div></div></div>
+
+  <aside class="sidebar glass sidebar-drawer" id="sidebarDrawer" aria-label="Workspace navigation">
+    <div class="sidebar-head">
+      <div class="brand-line">
+        <span class="brand-dot"></span>
+        <div>
+          <div class="brand-name">{{ school_settings.school_name }}</div>
+          <div class="brand-subtitle">User & finance dashboard</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-title">
+      <div class="eyebrow">Workspace menu</div>
+      <h2>Portal navigation</h2>
+    </div>
+
+    <nav class="side-nav side-nav-groups" aria-label="Workspace sections">
+      <section class="nav-group open">
+        <button class="nav-group-toggle" type="button" aria-expanded="true" data-target="home-panel">
+          <span>Home</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="home-panel">Home</button>
+          <button class="nav-link nav-action" type="button" data-target="home-panel" data-scroll="home-stats-grid">Summary</button>
+        </div>
+      </section>
+      <section class="nav-group open">
+        <button class="nav-group-toggle" type="button" aria-expanded="true" data-target="students-panel">
+          <span>Pupil management</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="students-panel">Pupil records</button>
+          <button class="nav-link nav-action" type="button" data-target="students-panel" data-scroll="selected-pupil-summary">Open pupil details</button>
+        </div>
+      </section>
+      <section class="nav-group">
+        <button class="nav-group-toggle" type="button" aria-expanded="false" data-target="add-pupil-panel">
+          <span>Add pupil</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="add-pupil-panel">Admission form</button>
+        </div>
+      </section>
+      <section class="nav-group">
+        <button class="nav-group-toggle" type="button" aria-expanded="false" data-target="payments-panel">
+          <span>Payments</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="payments-panel" data-scroll="payment-partition">Payment partition</button>
+          <button class="nav-link nav-action" type="button" data-target="payments-panel" data-scroll="unpaid-after-deadline">Unpaid after deadline</button>
+        </div>
+      </section>
+      <section class="nav-group">
+        <button class="nav-group-toggle" type="button" aria-expanded="false" data-target="examinations-panel">
+          <span>Examinations</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="examinations-panel">Computation panel</button>
+          <button class="nav-link nav-action" type="button" data-target="examinations-panel" data-scroll="exam-results-summary">Submit to admin</button>
+        </div>
+      </section>
+      <section class="nav-group">
+        <button class="nav-group-toggle" type="button" aria-expanded="false" data-target="analytics-panel">
+          <span>Analytics</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="analytics-panel">Charts</button>
+          <button class="nav-link nav-action" type="button" data-target="analytics-panel" data-scroll="method-bars">Payment methods</button>
+        </div>
+      </section>
+      <section class="nav-group">
+        <button class="nav-group-toggle" type="button" aria-expanded="false" data-target="profile-panel">
+          <span>Account</span><span class="nav-caret">▾</span>
+        </button>
+        <div class="nav-group-links">
+          <button class="nav-link nav-action" type="button" data-target="profile-panel">Profile</button>
+        </div>
+      </section>
+    </nav>
+
+    <div class="sidebar-foot">
+      <a class="btn btn-ghost btn-block" href="{{ url_for('logout') }}">Logout</a>
+    </div>
+  <div class="sidebar-help"><a class="nav-link" href="/system-help">System Help</a><a class="nav-link" href="/ai-assistant">AI Assistant</a></div></aside>
+
+  <main class="content">
+    <header class="topbar glass slim-topbar">
+      <div class="topbar-left">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Open navigation"><span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <div class="topbar-brand">
+          <div class="topbar-title">{{ school_settings.school_name }}</div>
+          <div class="topbar-subtitle">User dashboard</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="muted topbar-clock" id="liveClock">Tuesday, Aug 4, 2026 • 11:30:58</div>
+        <a class="btn btn-ghost mini" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    <div class="quick-actions" style="margin:0 0 10px 0"><a class="btn btn-ghost mini" href="/system-help">System Help</a><a class="btn btn-primary mini" href="/ai-assistant">AI Assistant</a></div></header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <section id="home-panel" class="panel glass workspace-panel landing-panel">
+      <div class="eyebrow">Home</div>
+      <h1 class="hero-title">Available pupils</h1>
+      <p class="hero-copy">Quick access to active pupils, fee status, and the live pupil record view.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th><th>Admission number</th><th>Status (fee status)</th><th>View</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in available_students %}
+            <tr class="student-row" data-student-id="{{ s.id }}">
+              <td>{{ s.full_name }}</td>
+              <td>{{ s.admission_no }}</td>
+              <td><span class="pill {{ s.payment_status|lower }}">{{ s.payment_status }}</span></td>
+              <td><a class="btn btn-ghost mini js-view-student" href="{{ url_for('dashboard', student_id=s.id) }}#students-panel" data-student-id="{{ s.id }}" data-detail-url="{{ url_for('dashboard', student_id=s.id) }}#students-panel">View</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" type="button" data-target="add-pupil-panel">Add pupil</button>
+        <button class="btn btn-ghost" type="button" data-target="payments-panel">Receive payment</button>
+        <a class="btn btn-ghost" href="{{ url_for('export_data', kind='students') }}">Download students CSV</a>
+      </div>
+      <div class="stats-grid" id="home-stats-grid">
+        <div class="mini-card"><span>Total pupils</span><strong>{{ summary.students }}</strong></div>
+        <div class="mini-card"><span>Active pupils</span><strong>{{ summary.active_students }}</strong></div>
+        <div class="mini-card"><span>Paid</span><strong>{{ summary.paid }}</strong></div>
+        <div class="mini-card"><span>Pending</span><strong>{{ summary.pending }}</strong></div>
+        <div class="mini-card"><span>Total collections</span><strong>{{ school_settings.currency_code }} {{ "{:,.0f}".format(summary.collections or 0) }}</strong></div>
+        <div class="mini-card"><span>Total balance</span><strong>{{ school_settings.currency_code }} {{ "{:,.0f}".format(summary.balance or 0) }}</strong></div>
+      </div>
+    </section>
+
+    <section id="students-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Pupil management</div>
+          <h3>Names, admission numbers, grades, status</h3>
+          {% if selected_grade %}<div class="muted">Filtered to {{ selected_grade }}</div>{% endif %}
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th><th>Admission No.</th><th>Grade</th><th>Status</th><th>Balance</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in students %}
+            <tr class="student-row" data-student-id="{{ s.id }}">
+              <td>{{ s.full_name }}</td>
+              <td>{{ s.admission_no }}</td>
+              <td>{{ s.grade }}</td>
+              <td><span class="pill {{ s.payment_status|lower }}">{{ s.payment_status }}</span></td>
+              <td>KES {{ "{:,.0f}".format(s.balance or 0) }}</td>
+              <td><a class="btn btn-ghost mini js-view-student" href="{{ url_for('dashboard', student_id=s.id) }}#students-panel" data-student-id="{{ s.id }}" data-detail-url="{{ url_for('dashboard', student_id=s.id) }}#students-panel">View</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="add-pupil-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Add pupil</div>
+          <h3>Registration form</h3>
+        </div>
+      </div>
+      <form class="stack-form two-col" method="post" action="{{ url_for('add_student') }}">
+        <label><span>Admission number</span><input name="admission_no" placeholder="Leave blank to auto-generate"></label>
+        <label><span>Pupil name</span><input name="full_name" required></label>
+        <label><span>Grade</span><input name="grade" placeholder="Grade 8" required></label>
+        <label><span>Parent / guardian name</span><input name="guardian_name" placeholder="Primary guardian"></label>
+        <label><span>Guardian phone</span><input name="guardian_phone" placeholder="0700..."></label>
+        <label><span>Guardian email</span><input name="guardian_email" type="email" placeholder="name@example.com"></label>
+        <label><span>Alternative guardian</span><input name="alt_guardian_name" placeholder="Optional"></label>
+        <label><span>Alt guardian phone</span><input name="alt_guardian_phone" placeholder="Optional"></label>
+        <label><span>Alt guardian email</span><input name="alt_guardian_email" type="email" placeholder="Optional"></label>
+        <label><span>Student phone</span><input name="student_phone" placeholder="Optional"></label>
+        <label><span>Student email</span><input name="student_email" type="email" placeholder="Optional"></label>
+        <label><span>Medical condition</span><input name="medical_condition" placeholder="Optional"></label>
+        <label><span>Allergies</span><input name="allergies" placeholder="Optional"></label>
+        <label style="grid-column:1/-1"><span>Special info</span><input name="special_info" placeholder="Optional accountability notes, sickness, care instructions, etc."></label>
+        <label style="grid-column:1/-1"><span>Additional notes</span><input name="notes" placeholder="Optional"></label>
+        <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save pupil</button></div>
+      </form>
+    </section>
+
+    <section id="payments-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Payments</div>
+          <h3>Record receipts and follow up balances</h3>
+        </div>
+      </div>
+      <div id="payment-partition" class="mini-card" style="margin-bottom:16px">
+        <span>Payment partition</span>
+        <strong>Fee collection split and tracking</strong>
+        <div class="muted">Paid, pending, and deadline status are grouped here.</div>
+      </div>
+      <form class="stack-form two-col" method="post" action="{{ url_for('add_payment') }}">
+        <label><span>Admission number</span><input name="admission_no" required></label>
+        <label><span>Amount</span><input name="amount" inputmode="decimal" required></label>
+        <label><span>Payment method</span>
+          <select name="method" required>
+            <option value="">Select method</option>
+            <option>Cash</option><option>M-Pesa</option><option>Bank</option><option>Cheque</option>
+          </select>
+        </label>
+        <label><span>Reference / receipt number</span><input name="reference_no" placeholder="Receipt or transaction ID"></label>
+        <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save payment</button></div>
+      </form>
+      <div id="unpaid-after-deadline" class="mini-card" style="margin-top:16px">
+        <span>Unpaid after deadline</span>
+        <strong>Pending pupils</strong>
+        <div class="muted">Use the pupil table to review balances and follow up on pending accounts.</div>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table>
+          <thead><tr><th>Date</th><th>Admission No.</th><th>Pupil</th><th>Amount</th><th>Method</th><th>By</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for p in payments %}
+            <tr>
+              <td>{{ p.created_at[:16] }}</td>
+              <td>{{ p.admission_no }}</td>
+              <td>{{ p.student_name }}</td>
+              <td>KES {{ "{:,.0f}".format(p.amount or 0) }}</td>
+              <td>{{ p.method }}</td>
+              <td>{{ p.recorded_by_name }}</td>
+              <td><span class="pill {{ p.status|lower }}">{{ p.status }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="examinations-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Examinations</div>
+          <h3>Per-class computation and submission</h3>
+        </div>
+      </div>
+
+      <form class="stack-form two-col" method="get" action="{{ url_for('dashboard') }}" style="margin-bottom:14px">
+        <label><span>Grade / class</span>
+          <select name="exam_grade">
+            {% if available_grades %}
+              {% for grade in available_grades %}
+                <option value="{{ grade }}" {% if grade == exam_grade %}selected{% endif %}>{{ grade }}</option>
+              {% endfor %}
+            {% elif exam_grade %}
+              <option value="{{ exam_grade }}" selected>{{ exam_grade }}</option>
+            {% else %}
+              <option value="">Choose a class</option>
+            {% endif %}
+          </select>
+        </label>
+        <label><span>Term</span><input name="exam_term" value="{{ exam_term }}" placeholder="Term 1"></label>
+        <div style="grid-column:1/-1"><button class="btn btn-ghost" type="submit">Load class</button></div>
+      </form>
+
+      <form id="examComputationForm" class="detail-card" method="post" action="{{ url_for('submit_exams') }}">
+        <input type="hidden" name="grade" value="{{ exam_grade }}">
+        <input type="hidden" name="term" value="{{ exam_term }}">
+        <input type="hidden" name="exam_payload" id="examPayload">
+        <div class="panel-head" style="margin-bottom:14px">
+          <div>
+            <div class="eyebrow">Teacher workspace</div>
+            <h3 style="font-size:20px">Add subject columns, enter marks, and submit once</h3>
+          </div>
+          <button class="btn btn-primary" type="submit">Submit to admin</button>
+        </div>
+
+        <div class="stats-grid exam-metrics" id="examMetrics" style="margin-bottom:14px">
+          <div class="mini-card"><span>Loaded pupils</span><strong id="examLoadedPupils">{{ exam_students|length }}</strong></div>
+          <div class="mini-card"><span>Subjects</span><strong id="examLoadedSubjects">{{ exam_subjects|length }}</strong></div>
+          <div class="mini-card"><span>Class mean</span><strong id="examClassMean">0.0</strong></div>
+          <div class="mini-card"><span>Top grade</span><strong id="examTopGrade">—</strong></div>
+        </div>
+
+        <div class="table-wrap exam-table-wrap">
+          <table id="examTable">
+            <thead>
+              <tr id="examHeaderRow">
+                <th>Pupil</th>
+                <th>Admission No.</th>
+                {% for subject in exam_subjects %}
+                  <th><input class="exam-subject-input" type="text" value="{{ subject }}" aria-label="Subject name"></th>
+                {% endfor %}
+                <th>Total</th>
+                <th>Average</th>
+                <th>Grade</th>
+              </tr>
+            </thead>
+            <tbody id="examBody">
+              {% for s in exam_students %}
+                <tr data-student-id="{{ s.id }}">
+                  <td>{{ s.full_name }}</td>
+                  <td>{{ s.admission_no }}</td>
+                  {% for subject in exam_subjects %}
+                    <td><input class="exam-mark" type="number" min="0" max="100" step="0.1" placeholder="0-100" aria-label="Mark for {{ subject }}"></td>
+                  {% endfor %}
+                  <td class="exam-total">0</td>
+                  <td class="exam-average">0.0</td>
+                  <td class="exam-grade">—</td>
+                </tr>
+              {% endfor %}
+              {% if not exam_students %}
+                <tr><td colspan="{{ 6 + (exam_subjects|length) }}" class="muted">No pupils found for this class yet.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="quick-actions" style="margin-top:14px">
+          <button class="btn btn-ghost" id="addExamSubject" type="button">Add subject</button>
+          <button class="btn btn-primary" type="submit">Submit to admin</button>
+        </div>
+      </form>
+
+      <div class="table-wrap" style="margin-top:16px" id="exam-results-summary">
+        <table>
+          <thead><tr><th>Submitted</th><th>Grade</th><th>Term</th><th>Subjects</th><th>Entries</th><th>Mean</th><th>By</th></tr></thead>
+          <tbody>
+            {% for batch in exam_batches %}
+              <tr>
+                <td>{{ batch.created_at[:16] }}</td>
+                <td>{{ batch.grade }}</td>
+                <td>{{ batch.term }}</td>
+                <td>{{ batch.subjects }}</td>
+                <td>{{ batch.entries }}</td>
+                <td>{{ "{:,.1f}".format(batch.mean_mark or 0) }}</td>
+                <td>{{ batch.submitted_by_name }}</td>
+              </tr>
+            {% endfor %}
+            {% if not exam_batches %}
+              <tr><td colspan="7" class="muted">No exam submissions have been sent yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="analytics-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Analytics</div>
+          <h3>Collection split and payment methods</h3>
+        </div>
+      </div>
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="mini-card"><span>Paid</span><strong>{{ summary.paid }}</strong></div>
+        <div class="mini-card"><span>Pending</span><strong>{{ summary.pending }}</strong></div>
+        <div class="mini-card"><span>Total collections</span><strong>KES {{ "{:,.0f}".format(summary.collections or 0) }}</strong></div>
+        <div class="mini-card"><span>Active pupils</span><strong>{{ summary.active_students }}</strong></div>
+      </div>
+      <div id="method-bars" class="mini-card">
+        <span>Payments by method</span>
+        <strong>Cash • M-Pesa • Bank • Cheque</strong>
+        <div class="muted">The detailed method breakdown can be drawn here from the payment records.</div>
+        <div class="bar-chart">
+          <div class="bar-row"><span>Cash</span><div class="bar"><div style="width:60%"></div></div></div>
+          <div class="bar-row"><span>M-Pesa</span><div class="bar"><div style="width:85%"></div></div></div>
+          <div class="bar-row"><span>Bank</span><div class="bar"><div style="width:40%"></div></div></div>
+          <div class="bar-row"><span>Cheque</span><div class="bar"><div style="width:20%"></div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="profile-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Account</div>
+          <h3>Profile and session</h3>
+        </div>
+      </div>
+      <a class="btn btn-primary" href="{{ url_for('profile') }}">Open profile page</a>
+    </section>
+  </main>
+
+  <dialog class="modal" id="studentModal">
+    <div class="modal-card glass">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Student details</div>
+          <h3 id="modalStudentName">Loading...</h3>
+        </div>
+        <button class="btn btn-ghost mini" id="closeStudentModal" type="button">Close</button>
+      </div>
+      <div class="detail-grid">
+        <div class="mini-card"><span>Admission No.</span><strong id="modalAdmission"></strong></div>
+        <div class="mini-card"><span>Grade</span><strong id="modalGrade"></strong></div>
+        <div class="mini-card"><span>Status</span><strong id="modalStatus"></strong></div>
+        <div class="mini-card"><span>Balance</span><strong id="modalBalance"></strong></div>
+      </div>
+      <div class="detail-card">
+        <h4>Quick edit</h4>
+        <form class="stack-form two-col" id="studentEditForm" method="post">
+          <label><span>Admission number</span><input name="admission_no" id="editAdmissionNo" required></label>
+          <label><span>Pupil name</span><input name="full_name" id="editFullName" required></label>
+          <label><span>Grade</span><input name="grade" id="editGrade" required></label>
+          <label><span>Fee status</span>
+            <select name="payment_status" id="editPaymentStatus">
+              <option value="Pending">Pending</option>
+              <option value="Paid">Paid</option>
+            </select>
+          </label>
+          <label><span>Exact fee balance</span><input name="balance" id="editBalance" type="number" step="0.01" min="0"></label>
+          <label><span>Active</span>
+            <select name="active" id="editActive">
+              <option value="1">Active</option>
+              <option value="0">Inactive</option>
+            </select>
+          </label>
+          <label><span>Primary guardian</span><input name="guardian_name" id="editGuardianName"></label>
+          <label><span>Guardian phone</span><input name="guardian_phone" id="editGuardianPhone"></label>
+          <label><span>Guardian email</span><input name="guardian_email" id="editGuardianEmail" type="email"></label>
+          <label><span>Medical condition</span><input name="medical_condition" id="editMedical"></label>
+          <label><span>Allergies</span><input name="allergies" id="editAllergies"></label>
+          <label style="grid-column:1/-1"><span>Special info</span><input name="special_info" id="editSpecialInfo"></label>
+          <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Save changes</button></div>
+        </form>
+      </div>
+      <div class="detail-card">
+        <h4>Parent and contact details</h4>
+        <div class="detail-lines">
+          <div><span>Primary guardian</span><strong id="modalGuardian"></strong></div>
+          <div><span>Guardian phone</span><strong id="modalGuardianPhone"></strong></div>
+          <div><span>Guardian email</span><strong id="modalGuardianEmail"></strong></div>
+          <div><span>Medical condition</span><strong id="modalMedical"></strong></div>
+          <div><span>Allergies</span><strong id="modalAllergies"></strong></div>
+          <div><span>Special info</span><strong id="modalSpecialInfo"></strong></div>
+        </div>
+      </div>
+      <div class="table-wrap modal-table">
+        <table>
+          <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>By</th><th>Status</th></tr></thead>
+          <tbody id="modalPaymentsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    window.SCHOOL_PORTAL = { selectedStudentId: {{ selected_student.id if selected_student else 'null' }} };
+  </script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const table = document.getElementById("examTable");
+      const body = document.getElementById("examBody");
+      const headerRow = document.getElementById("examHeaderRow");
+      const addBtn = document.getElementById("addExamSubject");
+      const payloadField = document.getElementById("examPayload");
+      const classMeanEl = document.getElementById("examClassMean");
+      const topGradeEl = document.getElementById("examTopGrade");
+      const subjectCountEl = document.getElementById("examLoadedSubjects");
+
+      const gradeFromAverage = (value) => {
+        if (value >= 80) return "A";
+        if (value >= 75) return "A-";
+        if (value >= 70) return "B+";
+        if (value >= 65) return "B";
+        if (value >= 60) return "B-";
+        if (value >= 55) return "C+";
+        if (value >= 50) return "C";
+        if (value >= 45) return "C-";
+        if (value >= 40) return "D+";
+        if (value >= 35) return "D";
+        return "E";
+      };
+
+      const subjectInputs = () => Array.from(document.querySelectorAll(".exam-subject-input"));
+      const rows = () => Array.from(body?.querySelectorAll("tr[data-student-id]") || []);
+
+      const recalcRow = (row) => {
+        const inputs = Array.from(row.querySelectorAll(".exam-mark"));
+        const values = inputs.map((input) => {
+          const n = Number.parseFloat(input.value);
+          return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+        });
+        const total = values.reduce((sum, n) => sum + n, 0);
+        const avg = inputs.length ? total / inputs.length : 0;
+        row.querySelector(".exam-total").textContent = total.toFixed(0);
+        row.querySelector(".exam-average").textContent = avg.toFixed(1);
+        row.querySelector(".exam-grade").textContent = inputs.length ? gradeFromAverage(avg) : "—";
+      };
+
+      const recalcAll = () => {
+        let sum = 0;
+        let count = 0;
+        let topGrade = "—";
+        let topAvg = -1;
+        rows().forEach((row) => {
+          recalcRow(row);
+          const avg = Number.parseFloat(row.querySelector(".exam-average")?.textContent || "0") || 0;
+          if (avg > 0) {
+            sum += avg;
+            count += 1;
+            if (avg > topAvg) {
+              topAvg = avg;
+              topGrade = row.querySelector(".exam-grade")?.textContent || topGrade;
+            }
+          }
+        });
+        if (classMeanEl) classMeanEl.textContent = count ? (sum / count).toFixed(1) : "0.0";
+        if (topGradeEl) topGradeEl.textContent = topGrade;
+        if (subjectCountEl) subjectCountEl.textContent = subjectInputs().length.toString();
+      };
+
+      const syncPayload = () => {
+        const subjects = subjectInputs().map((input, index) => input.value.trim() || `Subject ${index + 1}`);
+        const payload = {
+          grade: document.querySelector('input[name="grade"]')?.value || "",
+          term: document.querySelector('input[name="term"]')?.value || "",
+          subjects,
+          rows: rows().map((row) => ({
+            student_id: row.dataset.studentId,
+            marks: subjects.reduce((acc, subject, idx) => {
+              const input = row.querySelectorAll(".exam-mark")[idx];
+              if (input) acc[subject] = input.value;
+              return acc;
+            }, {}),
+          })),
+        };
+        if (payloadField) payloadField.value = JSON.stringify(payload);
+      };
+
+      const addSubjectColumn = (name = "New subject") => {
+        if (!table || !headerRow || !body) return;
+        const th = document.createElement("th");
+        th.innerHTML = `<input class="exam-subject-input" type="text" value="${name}" aria-label="Subject name">`;
+        headerRow.insertBefore(th, headerRow.lastElementChild);
+        rows().forEach((row) => {
+          const td = document.createElement("td");
+          td.innerHTML = '<input class="exam-mark" type="number" min="0" max="100" step="0.1" placeholder="0-100">';
+          row.insertBefore(td, row.lastElementChild.previousElementSibling);
+        });
+        bindEvents();
+        recalcAll();
+        syncPayload();
+      };
+
+      let examEventsBound = false;
+      const bindEvents = () => {
+        if (examEventsBound) return;
+        examEventsBound = true;
+        table?.addEventListener("input", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          if (target.classList.contains("exam-mark") || target.classList.contains("exam-subject-input")) {
+            recalcAll();
+            syncPayload();
+          }
+        });
+      };
+
+      addBtn?.addEventListener("click", () => addSubjectColumn());
+      document.getElementById("examComputationForm")?.addEventListener("submit", () => syncPayload());
+      bindEvents();
+      recalcAll();
+      syncPayload();
+    });
+  </script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+{% include '_footer.html' %}</body>
+</html>

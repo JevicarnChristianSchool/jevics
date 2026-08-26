@@ -22,8 +22,8 @@
 @media(max-width:650px){.welcome-mark{padding:22px}.welcome-logo{width:46px;height:46px;margin-bottom:18px}.welcome-corner{right:18px;bottom:18px}.welcome-grid{background-size:38px 38px}}
 @media (prefers-reduced-motion:reduce){.welcome-splash{animation:none;opacity:0;visibility:hidden}.welcome-splash>*{animation:none}.welcome-mark{opacity:1;transform:none}.welcome-name,.welcome-kicker,.welcome-sub,.welcome-logo{opacity:1;transform:none}.welcome-rule{transform:none}.welcome-rail{transform:scaleY(1)}}
 </style>
-<body class="auth-body landing-body landing-font-scope" style="--primary-blue: {{ school_settings.landing_accent_color }};--deep-accent-blue:{{ school_settings.accent_color }};--landing-bg:{{ school_settings.landing_background_color }};--landing-panel:{{ school_settings.landing_panel_color }};--landing-text:{{ school_settings.landing_text_color }};{% if school_settings.landing_background_path %}background-image:linear-gradient(180deg,color-mix(in srgb,var(--landing-bg) 84%,transparent),color-mix(in srgb,var(--landing-bg) 94%,transparent)),url('/{{ school_settings.landing_background_path }}');background-size:cover;background-position:center;background-attachment:fixed;{% endif %}background-color:var(--landing-bg);color:var(--landing-text)">
-{% if welcome_animation %}<div class="welcome-splash welcome-style-{{ school_settings.welcome_animation_style|default('clean', true) }}" id="welcomeSplash" style="--ws-accent:{{ school_settings.landing_accent_color }};--ws-duration:{{ welcome_animation_duration_ms }}ms"><div class="welcome-grid" aria-hidden="true"></div><div class="welcome-rail" aria-hidden="true"></div><div class="welcome-mark">{% if school_settings.logo_path %}<img class="welcome-logo" src="/{{ school_settings.logo_path }}" alt="">{% endif %}<div class="welcome-kicker">Institutional technology</div><div class="welcome-rule"></div><h1 class="welcome-name">{{ welcome_animation_name }}</h1><div class="welcome-sub">Technology · Innovation · Impact</div><div class="welcome-progress" aria-hidden="true"><span></span></div></div><div class="welcome-corner" aria-hidden="true"><span></span><b>01</b></div></div>{% endif %}
+<body class="auth-body landing-body landing-font-scope" style="--primary-blue:#9d2b2f;--deep-accent-blue:#163f32;--landing-bg:#f5efe1;--landing-panel:#ffffff;--landing-text:#17231d;{% if school_settings.landing_background_path %}background-image:linear-gradient(180deg,color-mix(in srgb,var(--landing-bg) 84%,transparent),color-mix(in srgb,var(--landing-bg) 94%,transparent)),url('/{{ school_settings.landing_background_path }}');background-size:cover;background-position:center;background-attachment:fixed;{% endif %}background-color:var(--landing-bg);color:var(--landing-text)">
+{% if welcome_animation %}<div class="welcome-splash welcome-style-{{ school_settings.welcome_animation_style|default('clean', true) }}" id="welcomeSplash" style="--ws-accent:#9d2b2f;--ws-duration:{{ welcome_animation_duration_ms }}ms"><div class="welcome-grid" aria-hidden="true"></div><div class="welcome-rail" aria-hidden="true"></div><div class="welcome-mark">{% if school_settings.logo_path %}<img class="welcome-logo" src="/{{ school_settings.logo_path }}" alt="">{% endif %}<div class="welcome-kicker">Institutional technology</div><div class="welcome-rule"></div><h1 class="welcome-name">{{ welcome_animation_name }}</h1><div class="welcome-sub">Technology · Innovation · Impact</div><div class="welcome-progress" aria-hidden="true"><span></span></div></div><div class="welcome-corner" aria-hidden="true"><span></span><b>01</b></div></div>{% endif %}
 <main class="auth-shell landing-shell"><section class="auth-card glass portal-selector landing-card">
 <header class="landing-topbar" id="landingTop">
   <div class="landing-toprow">
@@ -119,12 +119,26 @@
     {% if school_settings.institution_contact %}<article id="contact"><span class="eyebrow">Vision · Direction · Contact</span><h2>Stay connected to the institution</h2><p>{{ school_settings.institution_contact }}</p></article>{% endif %}
   </section>
 
+  {% if about_sections %}
+  <section class="landing-deep-about" id="about-story" aria-label="Institutional story">
+    <div class="landing-section-heading"><div><div class="eyebrow">Our story</div><h2>The institution in its own words</h2><p>Detailed information prepared by the institution.</p></div></div>
+    <div class="landing-deep-about-list">
+      {% for section in about_sections %}
+      <article class="landing-deep-about-item layout-{{ section.layout }}">
+        <div class="deep-about-copy"><span class="eyebrow">{{ '%02d'|format(loop.index) }}</span>{% if section.title %}<h2>{{ section.title }}</h2>{% endif %}<div class="deep-about-body">{{ section.body|replace('\n','<br>')|safe }}</div></div>
+        {% if section.image %}<figure class="deep-about-media"><img src="/{{ section.image }}" alt="{{ section.title or portal_title }}"><figcaption>{{ section.caption }}</figcaption></figure>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% if school_settings.landing_show_dates %}<section class="landing-important-dates" id="dates"><div class="landing-section-heading"><div><div class="eyebrow">School calendar</div><h2>Important dates</h2><p>Upcoming events published by the institution.</p></div></div><div class="date-strip">{% for d in important_dates %}<article class="date-card"><div class="date-day">{{ d.event_date }}</div><strong>{{ d.title }}</strong>{% if d.event_time %}<span>{{ d.event_time }}</span>{% endif %}{% if d.location %}<span>{{ d.location }}</span>{% endif %}</article>{% else %}<div class="landing-empty">No important dates have been published yet.</div>{% endfor %}</div></section>{% endif %}
 
   {% if school_settings.public_map_query %}<section class="visitor-map" id="visit"><div class="visitor-copy"><div class="eyebrow">Visitors</div><h2>{{school_settings.public_location_title or 'Visit us today at this location'}}</h2><p>{{school_settings.public_address}}</p>{% if school_settings.public_location_notes %}<p>{{school_settings.public_location_notes}}</p>{% endif %}<a class="landing-action-secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{school_settings.public_map_query|urlencode}}">Open location in Maps</a></div><iframe title="Visitor location" src="https://www.google.com/maps?q={{school_settings.public_map_query|urlencode}}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></section>{% endif %}
 
   <section id="services" class="landing-services-note">
-    <div class="landing-section-heading"><div><div class="eyebrow">One public home</div><h2>Everything important starts here.</h2></div><p>The navigation above is the single doorway to school portals and online services. Public visitors stay here; authenticated users continue into their own secure workspace.</p></div>
+    <div class="landing-section-heading"><div><div class="eyebrow">Welcome</div><h2>{{ school_settings.school_name }} — a place for learning, community and growth.</h2></div><p>Explore the institution's story, important dates, visitor information and secure portals from the navigation above.</p></div>
   </section>
 
   {% if school_settings.landing_announcement or school_settings.landing_contact %}<section class="landing-notices" id="notices">{% if school_settings.landing_announcement %}<article><span class="eyebrow">School notice</span><p>{{ school_settings.landing_announcement }}</p></article>{% endif %}{% if school_settings.landing_contact %}<article><span class="eyebrow">Enquiries</span><p>{{ school_settings.landing_contact }}</p></article>{% endif %}</section>{% endif %}

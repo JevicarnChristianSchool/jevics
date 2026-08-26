@@ -719,6 +719,7 @@ def _init_db_once() -> None:
         ensure_column(conn, "school_settings", "institution_affiliations TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "institution_help TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "institution_contact TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "school_settings", "about_sections_json TEXT NOT NULL DEFAULT '[]'")
         ensure_column(conn, "school_settings", "institution_image_path TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "institution_image_2_path TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "institution_image_3_path TEXT NOT NULL DEFAULT ''")
@@ -2185,12 +2186,13 @@ def theme_style(settings=None) -> str:
     settings = settings or school_settings()
     def esc(v):
         return str(v).replace('<','').replace('>','').replace('"','').replace(';','')
-    bg=esc(settings['background_color'] or '#343541')
-    panel=esc(settings['panel_color'] or bg)
-    sidebar=esc(settings['sidebar_color'] or panel)
-    header=esc(settings['header_color'] or panel)
-    requested_text=esc(settings['text_color'] or '#ececf1')
-    requested_muted=esc(settings['muted_text_color'] or '#b5bac7')
+    # Current institution visual standard: red, cream, deep green and white.
+    bg='#f5efe1'
+    panel='#ffffff'
+    sidebar='#163f32'
+    header='#163f32'
+    requested_text='#17231d'
+    requested_muted='#6f756f'
     # User-selected colours remain authoritative, but unreadable combinations are automatically corrected.
     body_text=_best_text(bg, requested_text)
     panel_text=_best_text(panel, body_text)
@@ -2198,14 +2200,14 @@ def theme_style(settings=None) -> str:
     header_text=_best_text(header, body_text)
     muted=_best_text(bg, requested_muted, minimum=3.0)
     input_bg=_best_text(panel, bg, minimum=1.2) if _contrast_ratio(panel,bg)<1.12 else bg
-    primary_button_text=_best_text(settings['primary_color'] or '#3457d5', '#ffffff')
+    primary_button_text='#ffffff'
     heading_font=esc(settings['heading_font'] or settings['font_family'] or 'Inter')
     font_family=esc(settings['font_family'] or 'Inter')
     bg_path=str(settings.get('background_path','') or '').strip() if hasattr(settings,'get') else ''
     bg_image = f"body.app-body{{background-image:linear-gradient(180deg,rgba(15,23,42,.18),rgba(15,23,42,.24)),url('/{bg_path}');background-size:cover;background-position:center;background-attachment:fixed;}}" if bg_path else ''
     css=(
         f":root{{--bg:{bg};--panel:{panel};--panel-3:{input_bg};"
-        f"--primary-blue:{esc(settings['primary_color'] or '#3457d5')};--deep-accent-blue:{esc(settings['accent_color'] or '#3457d5')};"
+        f"--primary-blue:#9d2b2f;--deep-accent-blue:#163f32;"
         f"--primary-text:{body_text};--muted-text:{muted};--panel-text:{panel_text};--sidebar-text:{sidebar_text};--header-text:{header_text};"
         f"--text-soft:{_rgba(body_text,.06)};--text-border:{_rgba(body_text,.14)};--text-hover:{_rgba(body_text,.10)};"
         f"--input-text:{_best_text(input_bg,body_text)};--primary-button-text:{primary_button_text};"
@@ -2253,12 +2255,35 @@ def portal_qr_data_uri() -> str:
     qr=qrcode.QRCode(version=2,box_size=5,border=2); qr.add_data(payload); qr.make(fit=True)
     buf=io.BytesIO(); qr.make_image().save(buf,format="PNG"); return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode("ascii")
 
+def public_about_sections(settings):
+    """Return validated editable About-page sections without ever breaking the page."""
+    try:
+        raw = settings["about_sections_json"] if "about_sections_json" in settings.keys() else "[]"
+        data = json.loads(raw or "[]")
+        if not isinstance(data, list):
+            return []
+        out=[]
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            title=str(item.get("title", "")).strip()[:160]
+            body=str(item.get("body", "")).strip()
+            image=str(item.get("image", "")).strip()[:600]
+            caption=str(item.get("caption", "")).strip()[:300]
+            layout=item.get("layout", "reading")
+            if layout not in {"reading","image-left","image-right","feature"}: layout="reading"
+            if title or body or image:
+                out.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout})
+        return out
+    except Exception:
+        return []
+
 @app.context_processor
 def auth_template_context():
     settings=school_settings()
     return {
         "current_user": current_user(), "school_settings": settings, "portal_title": settings["school_name"], "theme_color": settings["primary_color"], "all_roles": ALL_PORTAL_ROLES, "public_roles": PUBLIC_ROLES,
-        "theme_style": theme_style(settings), "theme_preset_style": theme_preset_style(settings), "landing_style": landing_style(settings), "portal_landing_url": current_landing_url(),
+        "theme_style": theme_style(settings), "theme_preset_style": theme_preset_style(settings), "landing_style": landing_style(settings), "portal_landing_url": current_landing_url(), "about_sections": public_about_sections(settings),
         "active_adverts": active_advertisements(),
         "welcome_animation": bool(settings["welcome_animation_enabled"]), "welcome_animation_name": settings["welcome_animation_name"], "welcome_animation_duration_ms": int(settings["welcome_animation_duration_ms"] or 2200), "welcome_animation_style": settings["welcome_animation_style"] if "welcome_animation_style" in settings.keys() else "clean",
         "important_dates": important_dates(12, landing=request.path == '/'),
@@ -4615,10 +4640,32 @@ def institution():
 @role_required("Admin", "ICT")
 def institution_save():
     values={k:request.form.get(k,"").strip() for k in ["institution_history","institution_performance","institution_religion","institution_affiliations","institution_help","institution_contact","institution_portal_guide","institution_admin_guide","institution_ict_guide","institution_finance_guide","institution_driver_guide_en","institution_driver_guide_sw"]}
+    about_sections=[]
+    try:
+        raw_sections=json.loads(request.form.get("about_sections_json", "[]") or "[]")
+        if isinstance(raw_sections,list):
+            for item in raw_sections:
+                if not isinstance(item,dict): continue
+                title=str(item.get("title","")).strip()[:160]
+                body=str(item.get("body","")).strip()
+                image=str(item.get("image","")).strip()[:600]
+                caption=str(item.get("caption","")).strip()[:300]
+                layout=item.get("layout","reading")
+                if layout not in {"reading","image-left","image-right","feature"}: layout="reading"
+                if title or body or image: about_sections.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout})
+    except Exception:
+        about_sections=[]
     image=request.files.get("institution_image"); image_path=school_settings()["institution_image_path"] or ""
     if image and image.filename:
         dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True); fname=secure_filename(image.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image.save(out); image_path="uploads/institution/"+out.name
-    execute("UPDATE school_settings SET institution_history=?, institution_performance=?, institution_religion=?, institution_affiliations=?, institution_help=?, institution_contact=?, institution_portal_guide=?, institution_admin_guide=?, institution_ict_guide=?, institution_finance_guide=?, institution_driver_guide_en=?, institution_driver_guide_sw=?, institution_image_path=?, institution_enabled=1 WHERE id=1",(values["institution_history"],values["institution_performance"],values["institution_religion"],values["institution_affiliations"],values["institution_help"],values["institution_contact"],values["institution_portal_guide"],values["institution_admin_guide"],values["institution_ict_guide"],values["institution_finance_guide"],values["institution_driver_guide_en"],values["institution_driver_guide_sw"],image_path))
+    # Save optional images attached to individual About sections.
+    for i, item in enumerate(about_sections):
+        image_file=request.files.get(f"about_image_{i}")
+        if image_file and image_file.filename:
+            dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True)
+            fname=secure_filename(image_file.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image_file.save(out)
+            item["image"]="uploads/institution/"+out.name
+    execute("UPDATE school_settings SET institution_history=?, institution_performance=?, institution_religion=?, institution_affiliations=?, institution_help=?, institution_contact=?, institution_portal_guide=?, institution_admin_guide=?, institution_ict_guide=?, institution_finance_guide=?, institution_driver_guide_en=?, institution_driver_guide_sw=?, about_sections_json=?, institution_image_path=?, institution_enabled=1 WHERE id=1",(values["institution_history"],values["institution_performance"],values["institution_religion"],values["institution_affiliations"],values["institution_help"],values["institution_contact"],values["institution_portal_guide"],values["institution_admin_guide"],values["institution_ict_guide"],values["institution_finance_guide"],values["institution_driver_guide_en"],values["institution_driver_guide_sw"],json.dumps(about_sections, ensure_ascii=False),image_path))
     flash("Institution information updated.","success"); return redirect(url_for("institution"))
 
 @app.route("/admin/theme/preset", methods=["POST"])

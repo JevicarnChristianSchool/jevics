@@ -1320,3 +1320,41 @@ body.auth-body.landing-body .qr-login-grid, body.auth-body.landing-body #staffQr
   body.auth-body.landing-body .login-links-row .back-role-link{grid-column:auto!important}
   body.auth-body.landing-body .login-links-row a{min-height:52px!important;font-size:16px!important}
 }
+
+/* V31 INSTITUTION PALETTE — cream, red, deep green and white; no blue visual language. */
+:root{
+  --primary-blue:#9d2b2f;
+  --deep-accent-blue:#163f32;
+  --cool-pale-blue:#f5efe1;
+  --soft-blue:rgba(157,43,47,.08);
+  --success:#1b6a4a;
+  --danger:#a62d33;
+  --primary-text:#16231d;
+  --muted-text:#6e746f;
+  --panel:#ffffff;
+  --panel-2:#fbf7ed;
+  --panel-3:#f3ede0;
+  --border:rgba(22,63,50,.14);
+  --accent:#b43b3f;
+}
+body{background:#f6f1e6;color:#16231d}
+a{color:#163f32}a:hover{color:#9d2b2f}.btn-primary{background:linear-gradient(135deg,#163f32,#245946)!important;box-shadow:0 10px 24px rgba(22,63,50,.18)!important}.btn-secondary{background:#9d2b2f!important;color:#fff!important}.btn-ghost{border-color:rgba(22,63,50,.18)!important;color:#163f32!important;background:#fff!important}
+.topbar{border-top-color:#9d2b2f!important}
+.institution-footer,.app-footer-minimal{background:linear-gradient(135deg,#163f32 0%,#1c4b3a 70%,#8f2a31 100%)!important;color:#fff!important}.institution-footer a{color:#fff!important}
+
+body.auth-body.landing-body{
+  --public-green:#163f32;--public-green-2:#245946;--public-red:#9d2b2f;--public-red-soft:#c65a5e;--public-cream:#f5efe1;--public-white:#fff;--public-ink:#17231d;--public-grey:#70756f;
+  background:linear-gradient(180deg,#f5efe1 0%,#fff 40%,#f5efe1 100%)!important;color:var(--public-ink)!important;
+}
+body.auth-body.landing-body .landing-topbar{background:linear-gradient(135deg,#163f32 0%,#1f5a44 62%,#8f2a31 100%)!important;box-shadow:0 14px 30px rgba(22,63,50,.20)!important}
+body.auth-body.landing-body .landing-nav a,body.auth-body.landing-body .landing-nav-trigger{color:#fff!important}.landing-nav-menu.open>.landing-nav-trigger{background:rgba(255,255,255,.12)!important}
+body.auth-body.landing-body .landing-home-link{background:#9d2b2f!important;color:#fff!important}
+body.auth-body.landing-body .landing-hero,.landing-showcase{background:linear-gradient(180deg,rgba(22,63,50,.07),rgba(255,255,255,0))!important}
+body.auth-body.landing-body .landing-action-primary{background:#163f32!important}.landing-action-secondary{color:#163f32!important;border-color:rgba(157,43,47,.25)!important;background:#fff!important}
+body.auth-body.landing-body .date-day{color:#9d2b2f!important}.date-card{background:#fff!important;border-color:rgba(22,63,50,.12)!important}
+body.auth-body.landing-body .landing-section-heading h2,body.auth-body.landing-body .landing-story-grid h2{color:#163f32!important}
+body.auth-body.landing-body .landing-story-grid article,.landing-about-strip article,.landing-notices article,.landing-services-note{background:#fff!important;border-color:rgba(22,63,50,.12)!important}
+body.auth-body.landing-body .landing-deep-about{padding:34px 0}.landing-deep-about-list{display:grid;gap:26px}.landing-deep-about-item{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.72fr);gap:30px;align-items:center;padding:38px;border-radius:24px;background:#fff;border:1px solid rgba(22,63,50,.12);box-shadow:0 14px 38px rgba(22,63,50,.06)}.landing-deep-about-item.layout-image-left{grid-template-columns:minmax(280px,.72fr) minmax(0,1fr)}.landing-deep-about-item.layout-image-left .deep-about-copy{grid-column:2;grid-row:1}.landing-deep-about-item.layout-image-left .deep-about-media{grid-column:1;grid-row:1}.landing-deep-about-item.layout-feature{grid-template-columns:1fr}.deep-about-copy h2{font-size:clamp(30px,4vw,52px);line-height:1.03;letter-spacing:-.035em;margin:8px 0 16px;color:#163f32}.deep-about-body{font-size:18px;line-height:1.9;color:#343d37}.deep-about-media{margin:0;overflow:hidden;border-radius:20px;background:#f2ecdf}.deep-about-media img{width:100%;height:100%;min-height:320px;max-height:560px;object-fit:cover;display:block}.deep-about-media figcaption{padding:10px 14px;font-size:13px;color:#70756f;background:#fbf7ed}.layout-feature .deep-about-media img{min-height:420px}
+
+.about-editor{margin:18px 0;padding:24px;border-radius:22px;background:#fbf7ed;border:1px solid rgba(22,63,50,.14)}.about-editor-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.about-editor-head h3{margin:4px 0 6px;font-size:26px;color:#163f32}.about-editor-head p{margin:0;max-width:720px}.about-editor-card{padding:20px;margin-top:14px;border-radius:18px;background:#fff;border:1px solid rgba(22,63,50,.12);box-shadow:0 10px 24px rgba(22,63,50,.05)}.about-card-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.about-card-actions{display:flex;gap:6px;flex-wrap:wrap}.about-card-actions button{border:1px solid rgba(22,63,50,.15);background:#fbf7ed;color:#163f32;border-radius:9px;padding:7px 10px;font-weight:800;cursor:pointer}.about-card-actions button:last-child{color:#9d2b2f}.about-grid{display:grid;grid-template-columns:1fr 250px;gap:14px}.about-editor label{display:grid;gap:7px;margin-top:12px}.about-editor label>span{font-size:13px;font-weight:800;color:#163f32}.about-editor input,.about-editor textarea,.about-editor select{font:inherit;border:1px solid rgba(22,63,50,.16);border-radius:12px;padding:12px 13px;background:#fff;color:#16231d}.about-editor textarea{min-height:180px;resize:vertical;line-height:1.65}.about-editor input:focus,.about-editor textarea:focus,.about-editor select:focus{outline:none;border-color:#9d2b2f;box-shadow:0 0 0 3px rgba(157,43,47,.10)}
+@media(max-width:820px){body.auth-body.landing-body .landing-shell{width:100%!important;margin:0!important;border-radius:0!important}.landing-deep-about-item,.landing-deep-about-item.layout-image-left{grid-template-columns:1fr;padding:24px}.landing-deep-about-item.layout-image-left .deep-about-copy,.landing-deep-about-item.layout-image-left .deep-about-media{grid-column:auto;grid-row:auto}.deep-about-body{font-size:18px;line-height:1.85}.deep-about-media img,.layout-feature .deep-about-media img{min-height:250px}.about-editor-head{display:grid}.about-grid{grid-template-columns:1fr}.about-editor-card{padding:16px}}

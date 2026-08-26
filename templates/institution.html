@@ -87,6 +87,14 @@
       <label><span>Driver guide — English</span><textarea name="institution_driver_guide_en" rows="5">{{settings.institution_driver_guide_en}}</textarea></label>
       <label><span>Driver guide — Kiswahili</span><textarea name="institution_driver_guide_sw" rows="5">{{settings.institution_driver_guide_sw}}</textarea></label>
       <label><span>Who to contact</span><textarea name="institution_contact" rows="3">{{settings.institution_contact}}</textarea></label>
+      <div class="about-editor" id="aboutEditor">
+        <div class="about-editor-head">
+          <div><div class="eyebrow">About-page writer</div><h3>Build the institution's story</h3><p class="muted">Write, think, rearrange and polish each section. Nothing appears publicly until you save it.</p></div>
+          <div class="about-editor-head-actions"><a class="btn btn-ghost" href="/" target="_blank" rel="noopener">Preview public page</a><button type="button" class="btn btn-secondary" id="addAboutSection">+ Add section</button></div>
+        </div>
+        <input type="hidden" name="about_sections_json" id="aboutSectionsJson">
+        <div id="aboutSectionsList"></div>
+      </div>
       <label><span>Institution image</span><input type="file" name="institution_image" accept=".png,.jpg,.jpeg,.webp"></label>
       <button class="btn btn-primary" type="submit">Save institution profile</button>
     </form>
@@ -103,6 +111,34 @@ function moveInstitutionSlide(direction){
   const next=Math.max(0,Math.min(max,track.scrollLeft+direction*width));
   track.scrollTo({left:next,behavior:'smooth'});
 }
+
+const initialAboutSections={{ (settings.about_sections_json or '[]')|safe }};
+(function(){
+  const list=document.getElementById('aboutSectionsList'); const add=document.getElementById('addAboutSection'); const hidden=document.getElementById('aboutSectionsJson');
+  if(!list||!add||!hidden) return;
+  let sections=Array.isArray(initialAboutSections)?initialAboutSections:[];
+  function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+  function sync(){hidden.value=JSON.stringify(sections);} 
+  function render(){
+    list.innerHTML='';
+    sections.forEach((item,i)=>{
+      const card=document.createElement('article'); card.className='about-editor-card';
+      card.innerHTML=`<div class="about-card-toolbar"><strong>Section ${i+1}</strong><div class="about-card-actions"><button type="button" data-act="up" ${i===0?'disabled':''}>↑</button><button type="button" data-act="down" ${i===sections.length-1?'disabled':''}>↓</button><button type="button" data-act="remove">Remove</button></div></div>
+        <div class="about-grid"><label><span>Section heading</span><input data-field="title" value="${esc(item.title||'') }" placeholder="e.g. Our Founder"></label>
+        <label><span>Display style</span><select data-field="layout"><option value="reading" ${item.layout==='reading'?'selected':''}>Reading section</option><option value="image-left" ${item.layout==='image-left'?'selected':''}>Image left</option><option value="image-right" ${item.layout==='image-right'?'selected':''}>Image right</option><option value="feature" ${item.layout==='feature'?'selected':''}>Large feature</option></select></label></div>
+        <label><span>What users should read</span><textarea data-field="body" rows="8" placeholder="Take your time. Write the complete story for this section.">${esc(item.body||'')}</textarea></label>
+        <label><span>Image for this section (optional)</span><input type="file" name="about_image_${i}" accept=".png,.jpg,.jpeg,.webp">${item.image?`<small class="muted">Current image: ${esc(item.image)}</small>`:''}<input type="hidden" data-field="image" value="${esc(item.image||'')}"></label>
+        <label><span>Image caption (optional)</span><input data-field="caption" value="${esc(item.caption||'')}"></label>`;
+      card.querySelectorAll('[data-field]').forEach(el=>el.addEventListener('input',()=>{sections[i][el.dataset.field]=el.value; sync();}));
+      card.querySelectorAll('[data-act]').forEach(btn=>btn.addEventListener('click',()=>{const a=btn.dataset.act;if(a==='remove')sections.splice(i,1);if(a==='up'&&i>0)[sections[i-1],sections[i]]=[sections[i],sections[i-1]];if(a==='down'&&i<sections.length-1)[sections[i+1],sections[i]]=[sections[i],sections[i+1]];sync();render();}));
+      list.appendChild(card);
+      card.querySelectorAll('textarea[data-field=body]').forEach(el=>{el.style.minHeight='320px';});
+    });
+    sync();
+  }
+  add.addEventListener('click',()=>{sections.push({title:'',body:'',image:'',caption:'',layout:'reading'});render();});
+  render();
+})();
 </script>
 {% include '_footer.html' %}
 </body></html>

@@ -5401,54 +5401,87 @@ def add_student():
     generated_email=student_email_for(admission_no, fields['student_email'])
     student_id = None
     warnings = []
+
+    # The learner itself is authoritative. Build the INSERT from columns that are
+    # actually present in the deployed database so an older schema cannot block intake.
+    learner_values = {
+        "admission_no": admission_no, "full_name": full_name, "grade": grade, "age": age,
+        "guardian_name": fields["guardian_name"], "guardian_phone": fields["guardian_phone"],
+        "guardian_email": fields["guardian_email"], "alt_guardian_name": fields["alt_guardian_name"],
+        "alt_guardian_phone": fields["alt_guardian_phone"], "alt_guardian_email": fields["alt_guardian_email"],
+        "student_phone": fields["student_phone"], "student_email": generated_email,
+        "address": fields["address"], "date_of_birth": fields["date_of_birth"], "gender": fields["gender"],
+        "id_reference": fields["id_reference"], "emergency_contact": fields["emergency_contact"],
+        "blood_group": fields["blood_group"], "medical_notes": fields["medical_notes"],
+        "medical_condition": fields["medical_condition"], "allergies": fields["allergies"],
+        "special_info": fields["special_info"], "notes": fields["notes"],
+        "payment_status": "Pending", "balance": assessed, "fee_assessed_total": assessed,
+        "fee_override_enabled": 1 if fee_override_enabled else 0, "transport_zone": transport_zone,
+        "uses_school_bus": uses_bus, "meal_plan": meal_plan, "transport_charge": transport_charge, "active": 1,
+    }
+
     try:
-        student_id = execute("""INSERT INTO students(
-            admission_no,full_name,grade,age,guardian_name,guardian_phone,guardian_email,
-            alt_guardian_name,alt_guardian_phone,alt_guardian_email,student_phone,student_email,address,date_of_birth,gender,id_reference,emergency_contact,blood_group,medical_notes,
-            medical_condition,allergies,special_info,notes,payment_status,balance,fee_assessed_total,fee_override_enabled,transport_zone,uses_school_bus,meal_plan,transport_charge,active)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
-            (admission_no,full_name,grade,age,fields["guardian_name"],fields["guardian_phone"],fields["guardian_email"],
-             fields["alt_guardian_name"],fields["alt_guardian_phone"],fields["alt_guardian_email"],generated_email,generated_email,fields['address'],fields['date_of_birth'],fields['gender'],fields['id_reference'],fields['emergency_contact'],fields['blood_group'],fields['medical_notes'],
-             fields["medical_condition"],fields["allergies"],fields["special_info"],fields["notes"],"Pending",assessed,assessed,1 if fee_override_enabled else 0,transport_zone,uses_bus,meal_plan,transport_charge))
-        if not fee_override_enabled:
+        available_columns = table_columns(get_db(), "students")
+        insert_columns = [c for c in learner_values if c in available_columns]
+        if not {"admission_no", "full_name", "grade"}.issubset(insert_columns):
+            raise sqlite3.OperationalError("The deployed students table is missing a required identity column. Please run the database migration.")
+        placeholders = ",".join("?" for _ in insert_columns)
+        student_id = execute(
+            f"INSERT INTO students({','.join(insert_columns)}) VALUES({placeholders})",
+            tuple(learner_values[c] for c in insert_columns),
+        )
+    except sqlite3.IntegrityError as exc:
+        app.logger.exception("Student registration rejected at learner insert: %s", exc)
+        message = str(exc).lower()
+        if "unique" in message or "admission_no" in message:
+            flash("That admission number already exists. Choose a different number, or leave Admission No. blank so the system can generate one.", "danger")
+        else:
+            flash("The learner could not be saved because the database rejected one of the submitted fields. Check the learner details and try again.", "danger")
+        return redirect(url_for("admin_dashboard") + "#admin-add-student")
+    except Exception as exc:
+        app.logger.exception("Student registration failed at learner insert: %s", exc)
+        flash("The learner could not be saved. Please check the full name, class and admission number, then submit again.", "danger")
+        return redirect(url_for("admin_dashboard") + "#admin-add-student")
+
+    # Everything below this point is optional enrichment. A failure here must not
+    # undo the already-created learner.
+    if not fee_override_enabled:
+        try:
             if fee > 0:
-                fid=execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,fee,'Tuition / core school fee',actor['id']))
+                execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,fee,'Tuition / core school fee',actor['id']))
             if transport_charge > 0:
                 execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,transport_charge,'School transport — '+transport_zone,actor['id']))
             if meal_charge > 0:
                 execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,meal_charge,'Meal plan — '+meal_plan,actor['id']))
-
-        # Optional portal account: never let a secondary account/schema problem
-        # undo the authoritative learner record.
-        try:
-            username = admission_no.lower()
-            execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title,email) VALUES(?,?,?,?,?,1,?,?,?)",
-                    (full_name,username,generate_password_hash(admission_no),"Student",student_id,"Student","Student",generated_email))
         except Exception as exc:
-            warnings.append("student portal account setup skipped")
-            app.logger.warning("Student %s saved but portal account setup was skipped: %s", student_id, exc)
+            warnings.append("fee breakdown could not be posted automatically")
+            app.logger.exception("Student %s saved but fee charge setup failed: %s", student_id, exc)
 
-        # Optional automatic academic placement. Learner creation remains successful
-        # even if an old allocation table contains a bad record.
-        try:
-            placement = auto_place_new_student(student_id, grade, actor["id"])
-        except Exception as exc:
-            placement = {"class_teacher": None, "subjects": 0, "subject_teachers": 0}
-            warnings.append("automatic class/subject allocation skipped")
-            app.logger.warning("Student %s saved but automatic placement was skipped: %s", student_id, exc)
+    try:
+        username = admission_no.lower()
+        execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title,email) VALUES(?,?,?,?,?,1,?,?,?)",
+                (full_name,username,generate_password_hash(admission_no),"Student",student_id,"Student","Student",generated_email))
+    except Exception as exc:
+        warnings.append("student portal account setup skipped")
+        app.logger.warning("Student %s saved but portal account setup was skipped: %s", student_id, exc)
 
+    try:
+        placement = auto_place_new_student(student_id, grade, actor["id"])
+    except Exception as exc:
+        placement = {"class_teacher": None, "subjects": 0, "subject_teachers": 0}
+        warnings.append("automatic class/subject allocation skipped")
+        app.logger.warning("Student %s saved but automatic placement was skipped: %s", student_id, exc)
+
+    try:
         audit(actor["id"], actor["full_name"], "Add Student",
               f"{full_name} ({admission_no}) created in school.db; grade={grade}; class_teacher={placement['class_teacher'] or 'pending'}; subjects={placement['subjects']}; subject_teachers={placement['subject_teachers']}.")
-        if warnings:
-            flash("Student added successfully. Required learner data was saved; " + "; ".join(warnings) + ".", "warning")
-        else:
-            flash("Student added successfully. The learner record is ready.", "success")
-    except sqlite3.IntegrityError as exc:
-        app.logger.warning("Student registration rejected: %s", exc)
-        flash("Student could not be added because that admission number already exists or the learner data conflicts with an existing record.", "danger")
     except Exception as exc:
-        app.logger.exception("Student registration failed: %s", exc)
-        flash("Student could not be added. No partial learner record was intentionally created.", "danger")
+        app.logger.warning("Student %s saved but audit logging failed: %s", student_id, exc)
+
+    if warnings:
+        flash("Student added successfully. The learner record is saved; " + "; ".join(warnings) + ".", "warning")
+    else:
+        flash("Student added successfully. The learner record is ready.", "success")
     return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
 @app.route("/students/<int:student_id>/subjects", methods=["GET","POST"])

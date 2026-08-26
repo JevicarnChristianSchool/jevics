@@ -700,7 +700,7 @@ def _init_db_once() -> None:
         ensure_column(conn, "school_settings", "results_label TEXT NOT NULL DEFAULT 'Results'")
         ensure_column(conn, "school_settings", "assignments_label TEXT NOT NULL DEFAULT 'Assignments'")
         ensure_column(conn, "school_settings", "home_label TEXT NOT NULL DEFAULT 'Home'")
-        ensure_column(conn, "school_settings", "result_download_balance_limit REAL NOT NULL DEFAULT 500")
+        ensure_column(conn, "school_settings", "result_download_balance_limit REAL NOT NULL DEFAULT 0")
         ensure_column(conn, "school_settings", "result_release_mode TEXT NOT NULL DEFAULT 'Finance Approval'")
         ensure_column(conn, "school_settings", "exam_card_enabled INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "school_settings", "auth_required INTEGER NOT NULL DEFAULT 0")
@@ -933,6 +933,76 @@ def _init_db_once() -> None:
         ensure_column(conn, "users", "qr_access_token TEXT")
         ensure_column(conn, "users", "qr_login_enabled INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "users", "last_password_login_at TEXT")
+
+        # V25 institution upgrades: learner fee composition, transport zones,
+        # promotion workflow, generated learner email domain, and safer payroll bulk actions.
+        for table, coldef in [
+            ("students", "fee_assessed_total REAL NOT NULL DEFAULT 0"),
+            ("students", "fee_override_enabled INTEGER NOT NULL DEFAULT 0"),
+            ("students", "transport_zone TEXT NOT NULL DEFAULT ''"),
+            ("students", "uses_school_bus INTEGER NOT NULL DEFAULT 0"),
+            ("students", "meal_plan TEXT NOT NULL DEFAULT 'None'"),
+            ("students", "transport_charge REAL NOT NULL DEFAULT 0"),
+            ("students", "last_promotion_action TEXT NOT NULL DEFAULT ''"),
+            ("students", "academic_year TEXT NOT NULL DEFAULT ''"),
+            ("students", "promoted_from_grade TEXT NOT NULL DEFAULT ''"),
+            ("users", "email TEXT NOT NULL DEFAULT ''"),
+            ("school_settings", "student_email_domain TEXT NOT NULL DEFAULT 'school.ac.ke'"),
+            ("school_settings", "public_location_title TEXT NOT NULL DEFAULT 'Visit us today at this location'"),
+            ("school_settings", "public_address TEXT NOT NULL DEFAULT ''"),
+            ("school_settings", "public_location_notes TEXT NOT NULL DEFAULT ''"),
+            ("school_settings", "public_map_query TEXT NOT NULL DEFAULT ''"),
+        ]:
+            ensure_column(conn, table, coldef)
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS transport_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            zone_name TEXT NOT NULL UNIQUE,
+            amount REAL NOT NULL DEFAULT 0,
+            period TEXT NOT NULL DEFAULT 'Term 1',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS promotion_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            academic_year TEXT NOT NULL,
+            effective_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Draft',
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
+            FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS promotion_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            student_id INTEGER NOT NULL,
+            from_grade TEXT NOT NULL,
+            to_grade TEXT NOT NULL,
+            decision TEXT NOT NULL DEFAULT 'Promote',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(run_id) REFERENCES promotion_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_promotion_items_run ON promotion_items(run_id,student_id);
+        """)
+        # Seed a single generic transport zone only when the institution has none.
+        if conn.execute("SELECT COUNT(*) FROM transport_rates").fetchone()[0] == 0:
+            conn.execute("INSERT INTO transport_rates(zone_name,amount,period,active) VALUES('Local / Zone A',0,'Term 1',1)")
+        conn.execute("UPDATE school_settings SET public_location_title=COALESCE(NULLIF(public_location_title,''),'Visit us today at this location') WHERE id=1")
+        conn.execute("UPDATE school_settings SET public_address='', public_location_notes='', public_map_query='' WHERE id=1 AND (public_address LIKE '%Kimbo%' OR public_map_query LIKE '%Kimbo%')")
+        # Reconcile legacy learner balances after migration/restore.
+        for row in conn.execute("SELECT id FROM students").fetchall():
+            sid=row[0]
+            assessed=conn.execute("SELECT COALESCE(SUM(amount),0) FROM fee_charges WHERE student_id=? AND status='Posted'",(sid,)).fetchone()[0] or 0
+            st=conn.execute("SELECT fee_assessed_total,fee_override_enabled FROM students WHERE id=?",(sid,)).fetchone()
+            if not assessed and st and float(st[0] or 0)>0: assessed=float(st[0] or 0)
+            if st and int(st[1] or 0): assessed=float(st[0] or 0)
+            paid=conn.execute("SELECT COALESCE(SUM(amount),0) FROM payments WHERE student_id=? AND status='Posted'",(sid,)).fetchone()[0] or 0
+            conn.execute("UPDATE students SET fee_assessed_total=?,balance=?,payment_status=? WHERE id=?",(assessed,float(assessed)-float(paid),'Paid' if float(assessed)-float(paid)<=0 else 'Pending',sid))
         conn.execute("CREATE TABLE IF NOT EXISTS school_calendar (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'School Day',school_day INTEGER NOT NULL DEFAULT 1,notes TEXT NOT NULL DEFAULT '',created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_school_calendar_range ON school_calendar(start_date,end_date,school_day)")
         ensure_column(conn, "users", "position_code TEXT NOT NULL DEFAULT ''")
@@ -1348,7 +1418,7 @@ def _init_db_once() -> None:
             conn.execute("UPDATE school_settings SET auth_initialized=1, auth_required=1 WHERE id=1")
 
         # Optional coherent demonstration institution. Set SEED_DEMO_DATA=0 in production to disable.
-        if os.environ.get("SEED_DEMO_DATA", "1") != "0":
+        if os.environ.get("SEED_DEMO_DATA", "0") != "0":
             meta = conn.execute("SELECT version FROM demo_seed_meta WHERE id=1").fetchone()
             if not meta or int(meta["version"] or 0) < 2:
                 demo_teacher_pw = generate_password_hash(os.environ.get("DEMO_TEACHER_PASSWORD", "DemoTeacher@123"))
@@ -1519,6 +1589,51 @@ def execute(sql: str, params: Iterable[Any] = ()) -> int:
     db.commit()
     return cur.lastrowid
 
+
+
+def recalculate_student_balance(student_id: int) -> dict:
+    """Rebuild a learner's account from assessed charges and posted payments.
+    Manual fee override wins when enabled; otherwise active fee charges are authoritative.
+    """
+    student=q("SELECT * FROM students WHERE id=?",(student_id,),one=True)
+    if not student:
+        return {"assessed":0.0,"paid":0.0,"balance":0.0,"status":"Pending"}
+    if int(student["fee_override_enabled"] or 0):
+        assessed=float(student["fee_assessed_total"] or 0)
+    else:
+        assessed=float(q("SELECT COALESCE(SUM(amount),0) AS n FROM fee_charges WHERE student_id=? AND status='Posted'",(student_id,),one=True)["n"] or 0)
+        # Preserve legacy manually entered balances until the first structured charge is applied.
+        if assessed == 0 and float(student["fee_assessed_total"] or 0) > 0:
+            assessed=float(student["fee_assessed_total"] or 0)
+    paid=float(q("SELECT COALESCE(SUM(amount),0) AS n FROM payments WHERE student_id=? AND status='Posted'",(student_id,),one=True)["n"] or 0)
+    balance=assessed-paid
+    status="Paid" if balance <= 0 else "Pending"
+    execute("UPDATE students SET fee_assessed_total=?, balance=?, payment_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",(assessed,balance,status,student_id))
+    return {"assessed":assessed,"paid":paid,"balance":balance,"status":status}
+
+def student_email_for(admission_no: str, existing: str = "") -> str:
+    existing=(existing or "").strip().lower()
+    if existing:
+        return existing
+    domain=(school_settings()["student_email_domain"] or "school.ac.ke").strip().lstrip("@").lower()
+    local=re.sub(r"[^a-z0-9]+",".",(admission_no or "student").lower()).strip(".") or "student"
+    return f"{local}@{domain}"
+
+def next_grade_for(grade: str) -> str:
+    raw=(grade or "").strip().lower().replace("_"," ").replace("-"," ")
+    mapping={
+        "playgroup":"PP1","play group":"PP1","pp1":"PP2","pp2":"Grade 1",
+        "grade 1":"Grade 2","grade 2":"Grade 3","grade 3":"Grade 4","grade 4":"Grade 5",
+        "grade 5":"Grade 6","grade 6":"Grade 7","grade 7":"Grade 8","grade 8":"Grade 9",
+        "grade 9":"Grade 10","grade 10":"Grade 11","grade 11":"Grade 12"
+    }
+    return mapping.get(raw, "")
+
+def return_to_referrer(fallback_endpoint: str):
+    ref=request.referrer
+    if ref and ref.startswith(request.host_url.rstrip("/") + "/"):
+        return ref
+    return url_for(fallback_endpoint)
 
 def school_settings():
     """Return the single school-wide portal settings row, creating it when needed."""
@@ -1723,7 +1838,7 @@ def persist_auth_cookie(response):
         try:
             body=response.get_data(as_text=True)
             if 'id="prime-global-tools"' not in body and "</body>" in body:
-                shell="""<button id="prime-mobile-nav" class="prime-mobile-nav" type="button" aria-label="Open navigation" aria-expanded="false" title="Open navigation"><span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span></button><div id="prime-mobile-menu" class="prime-mobile-menu"><a href="/dashboard">Dashboard</a><a href="/calendar">School calendar</a><a href="/notifications">Notifications</a><a href="/system-help">System help</a><a href="/logout">Logout</a></div><div id="prime-global-tools" class="prime-global-tools"><a class="prime-search-link" href="/system-search" aria-label="Search system" title="Search system"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg></a><a class="prime-bell" href="/notifications" aria-label="Notifications" title="Notifications"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><b id="prime-notification-count" class="prime-count hidden"></b></a><button type="button" class="prime-shortcuts-btn" aria-label="Open shortcuts" onclick="document.getElementById('prime-shortcuts').classList.toggle('open')">☰</button><div id="prime-shortcuts" class="prime-shortcuts"><strong>Quick access</strong><a href="/calendar">Calendar</a><a href="/notifications">Notifications</a><a href="/online-classes">Live classes</a><a href="/groups">Groups</a><a href="/leadership">Leadership</a></div></div><button id="prime-mobile-text" class="prime-mobile-text" type="button" aria-label="Adjust text size" title="Adjust text size">Aa</button><div id="prime-text-sheet" class="prime-text-sheet" role="dialog" aria-modal="true" aria-label="Text size settings"><div class="prime-text-sheet-card"><div><strong>Text size</strong><span class="muted">Adjust this device only.</span></div><div class="prime-text-choices"><button type="button" data-prime-text="normal">Normal</button><button type="button" data-prime-text="large">Large</button><button type="button" data-prime-text="xlarge">Extra large</button></div><button type="button" class="btn btn-ghost btn-block" id="prime-text-close">Done</button></div></div><style>.prime-global-tools{position:fixed;right:18px;top:16px;z-index:5000;display:flex;gap:8px;align-items:flex-start;font-family:system-ui,sans-serif}.prime-search-link,.prime-bell,.prime-shortcuts-btn{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;text-decoration:none;border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 35%,transparent);background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 8px 30px rgba(0,0,0,.18);cursor:pointer}.prime-search-link,.prime-bell{font-size:18px}.prime-bell span{color:inherit;font-size:18px;line-height:1}.prime-count{position:absolute;right:45px;top:-3px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#dc143c;color:#fff;font:700 10px/17px system-ui;text-align:center}.prime-count.dot{width:8px;min-width:8px;height:8px;padding:0;line-height:8px;right:47px}.prime-count.hidden{display:none}.prime-shortcuts{display:none;position:absolute;right:0;top:48px;min-width:190px;padding:10px;border-radius:14px;background:var(--panel,#fff);border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 20%,transparent);box-shadow:0 18px 40px rgba(0,0,0,.22)}.prime-shortcuts.open{display:grid;gap:5px}.prime-shortcuts strong{padding:5px 8px}.prime-shortcuts a{padding:8px 10px;border-radius:9px;color:inherit;text-decoration:none}.prime-shortcuts a:hover{background:rgba(127,127,127,.12)}.prime-mobile-nav{display:none}.prime-mobile-nav.open{display:grid}.prime-mobile-text,.prime-text-sheet{display:none}body.auth-body .prime-global-tools,body.auth-body .prime-mobile-nav,body.auth-body .prime-mobile-menu,body.auth-body .prime-mobile-text{display:none}@media(max-width:820px){.prime-shortcuts-btn{display:none!important}.prime-mobile-nav{display:grid;place-items:center;position:fixed;left:12px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:22px;cursor:pointer;z-index:5001}.prime-global-tools{right:12px;top:12px}.prime-mobile-text{display:grid;place-items:center;position:fixed;right:64px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:15px;font-weight:900;cursor:pointer;z-index:5001}.prime-text-sheet{position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:6000;align-items:flex-end;justify-content:center;padding:14px}.prime-text-sheet.open{display:flex}.prime-text-sheet-card{width:min(460px,100%);border:1px solid var(--text-border,var(--border));border-radius:20px 20px 14px 14px;background:var(--panel);box-shadow:0 -18px 50px rgba(0,0,0,.26);padding:18px;display:grid;gap:16px}.prime-text-sheet-card>div:first-child{display:grid;gap:4px}.prime-text-choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.prime-text-choices button{border:1px solid var(--text-border,var(--border));background:var(--panel-3);color:var(--primary-text);border-radius:12px;padding:12px 8px;font-weight:800;cursor:pointer}.prime-text-choices button.active{border-color:var(--primary-blue);box-shadow:0 0 0 3px rgba(16,163,127,.14)}}</style><script>(function(){var m=document.getElementById('prime-mobile-nav');if(m){if(document.getElementById('sidebarToggle')){m.remove();}else{m.addEventListener('click',function(){var hasSidebar=!!document.querySelector('.sidebar');document.body.classList.toggle(hasSidebar?'mobile-nav-open':'prime-smart-menu-open');});}}var tb=document.getElementById('prime-mobile-text'),sheet=document.getElementById('prime-text-sheet'),close=document.getElementById('prime-text-close'),choices=document.querySelectorAll('[data-prime-text]');var saved=localStorage.getItem('prime_text_size')||'large';if(saved==='normal'||saved==='large'||saved==='xlarge')document.documentElement.dataset.primeText=saved;if(tb&&sheet){tb.addEventListener('click',function(){sheet.classList.add('open');});sheet.addEventListener('click',function(e){if(e.target===sheet)sheet.classList.remove('open');});close&&close.addEventListener('click',function(){sheet.classList.remove('open');});choices.forEach(function(b){b.classList.toggle('active',b.dataset.primeText===saved);b.addEventListener('click',function(){saved=b.dataset.primeText;localStorage.setItem('prime_text_size',saved);document.documentElement.dataset.primeText=saved;choices.forEach(function(x){x.classList.toggle('active',x.dataset.primeText===saved);});});});}fetch('/api/notifications').then(r=>r.json()).then(d=>{var n=document.getElementById('prime-notification-count');if(!n)return;var c=Number(d.count||0);if(c<=0){n.classList.add('hidden');return;}n.classList.remove('hidden');if(c>5){n.textContent='';n.classList.add('dot');}else{n.textContent=String(c);n.classList.remove('dot');}}).catch(function(){});})();</script>"""
+                shell="""<button id="prime-mobile-nav" class="prime-mobile-nav" type="button" aria-label="Open navigation" aria-expanded="false" title="Open navigation"><span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span></button><div id="prime-mobile-menu" class="prime-mobile-menu"><a href="/dashboard">Dashboard</a><a href="/calendar">School calendar</a><a href="/notifications">Notifications</a><a href="/system-help">System help</a><a href="/logout">Logout</a></div><div id="prime-global-tools" class="prime-global-tools"><a class="prime-search-link" href="/system-search" aria-label="Search system" title="Search system"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg></a><a class="prime-bell" href="/notifications" aria-label="Notifications" title="Notifications"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><b id="prime-notification-count" class="prime-count hidden"></b></a><button type="button" class="prime-shortcuts-btn" aria-label="Open shortcuts" onclick="document.getElementById('prime-shortcuts').classList.toggle('open')">☰</button><div id="prime-shortcuts" class="prime-shortcuts"><strong>Quick access</strong><a href="/calendar">Calendar</a><a href="/notifications">Notifications</a><a href="/online-classes">Live classes</a><a href="/groups">Groups</a><a href="/leadership">Leadership</a></div></div><button id="prime-mobile-text" class="prime-mobile-text" type="button" aria-label="Adjust text size" title="Adjust text size">Aa</button><div id="prime-text-sheet" class="prime-text-sheet" role="dialog" aria-modal="true" aria-label="Text size settings"><div class="prime-text-sheet-card"><div><strong>Text size</strong><span class="muted">Adjust this device only.</span></div><div class="prime-text-choices"><button type="button" data-prime-text="normal">Normal</button><button type="button" data-prime-text="large">Large</button><button type="button" data-prime-text="xlarge">Extra large</button></div><button type="button" class="btn btn-ghost btn-block" id="prime-text-close">Done</button></div></div><style>.prime-global-tools{position:fixed;right:18px;top:16px;z-index:5000;display:flex;gap:8px;align-items:flex-start;font-family:system-ui,sans-serif}.prime-search-link,.prime-bell,.prime-shortcuts-btn{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;text-decoration:none;border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 35%,transparent);background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 8px 30px rgba(0,0,0,.18);cursor:pointer}.prime-search-link,.prime-bell{font-size:18px}.prime-bell span{color:inherit;font-size:18px;line-height:1}.prime-count{position:absolute;right:45px;top:-3px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#dc143c;color:#fff;font:700 10px/17px system-ui;text-align:center}.prime-count.dot{width:8px;min-width:8px;height:8px;padding:0;line-height:8px;right:47px}.prime-count.hidden{display:none}.prime-shortcuts{display:none;position:absolute;right:0;top:48px;min-width:190px;padding:10px;border-radius:14px;background:var(--panel,#fff);border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 20%,transparent);box-shadow:0 18px 40px rgba(0,0,0,.22)}.prime-shortcuts.open{display:grid;gap:5px}.prime-shortcuts strong{padding:5px 8px}.prime-shortcuts a{padding:8px 10px;border-radius:9px;color:inherit;text-decoration:none}.prime-shortcuts a:hover{background:rgba(127,127,127,.12)}.prime-mobile-nav{display:none}.prime-mobile-nav.open{display:grid}.prime-mobile-text,.prime-text-sheet{display:none}body.auth-body .prime-global-tools,body.auth-body .prime-mobile-nav,body.auth-body .prime-mobile-menu,body.auth-body .prime-mobile-text{display:none}@media(max-width:820px){.prime-shortcuts-btn{display:none!important}.prime-mobile-nav{display:grid;place-items:center;position:fixed;left:12px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:22px;cursor:pointer;z-index:5001}.prime-global-tools{right:12px;top:12px}.prime-mobile-text{display:grid;place-items:center;position:fixed;right:64px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:15px;font-weight:900;cursor:pointer;z-index:5001}.prime-text-sheet{position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:6000;align-items:flex-end;justify-content:center;padding:14px}.prime-text-sheet.open{display:flex}.prime-text-sheet-card{width:min(460px,100%);border:1px solid var(--text-border,var(--border));border-radius:20px 20px 14px 14px;background:var(--panel);box-shadow:0 -18px 50px rgba(0,0,0,.26);padding:18px;display:grid;gap:16px}.prime-text-sheet-card>div:first-child{display:grid;gap:4px}.prime-text-choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.prime-text-choices button{border:1px solid var(--text-border,var(--border));background:var(--panel-3);color:var(--primary-text);border-radius:12px;padding:12px 8px;font-weight:800;cursor:pointer}.prime-text-choices button.active{border-color:var(--primary-blue);box-shadow:0 0 0 3px rgba(16,163,127,.14)}}</style><script>(function(){var m=document.getElementById('prime-mobile-nav');if(m){if(document.getElementById('sidebarToggle')){m.remove();}else{m.addEventListener('click',function(e){e.stopPropagation();var hasSidebar=!!document.querySelector('.sidebar');document.body.classList.toggle(hasSidebar?'mobile-nav-open':'prime-smart-menu-open');});document.addEventListener('click',function(e){if(!m.contains(e.target)){document.body.classList.remove('mobile-nav-open','prime-smart-menu-open');}});}}var tb=document.getElementById('prime-mobile-text'),sheet=document.getElementById('prime-text-sheet'),close=document.getElementById('prime-text-close'),choices=document.querySelectorAll('[data-prime-text]');var saved=localStorage.getItem('prime_text_size')||'large';if(saved==='normal'||saved==='large'||saved==='xlarge')document.documentElement.dataset.primeText=saved;if(tb&&sheet){tb.addEventListener('click',function(){sheet.classList.add('open');});sheet.addEventListener('click',function(e){if(e.target===sheet)sheet.classList.remove('open');});close&&close.addEventListener('click',function(){sheet.classList.remove('open');});choices.forEach(function(b){b.classList.toggle('active',b.dataset.primeText===saved);b.addEventListener('click',function(){saved=b.dataset.primeText;localStorage.setItem('prime_text_size',saved);document.documentElement.dataset.primeText=saved;choices.forEach(function(x){x.classList.toggle('active',x.dataset.primeText===saved);});});});}fetch('/api/notifications').then(r=>r.json()).then(d=>{var n=document.getElementById('prime-notification-count');if(!n)return;var c=Number(d.count||0);if(c<=0){n.classList.add('hidden');return;}n.classList.remove('hidden');if(c>5){n.textContent='';n.classList.add('dot');}else{n.textContent=String(c);n.classList.remove('dot');}}).catch(function(){});})();</script>"""
                 response.set_data(body.replace("</body>",shell+"</body>",1))
         except Exception:
             pass
@@ -2709,6 +2824,14 @@ def login():
                         execute("UPDATE users SET password_hash=?, username=?, full_name=? WHERE id=?", (generate_password_hash(student["admission_no"]), student["admission_no"], student["full_name"], candidate["id"]))
                     break
         if not user:
+            email_candidate=q("SELECT * FROM users WHERE active=1 AND lower(trim(email))=? ORDER BY id DESC LIMIT 1", ((username or '').strip().lower(),), one=True)
+            if email_candidate:
+                user=email_candidate
+                if user['role']=='Student':
+                    st=q("SELECT admission_no FROM students WHERE id=? AND active=1",(user['student_id'],),one=True)
+                    if st and str(password).strip().lower()==str(st['admission_no'] or '').strip().lower():
+                        admission_login_ok=True
+        if not user:
             parent_candidates = q("SELECT * FROM users WHERE active=1 AND role='Parent' AND lower(trim(full_name))=? ORDER BY id DESC", (username,))
             for candidate in parent_candidates:
                 try:
@@ -2903,7 +3026,7 @@ def teacher_class_attendance():
 def finance_match_external(event_id:int):
     event=q("SELECT * FROM external_payment_events WHERE id=? AND status!='Matched'",(event_id,),one=True); sid=request.form.get('student_id',type=int); student=q('SELECT * FROM students WHERE id=? AND active=1',(sid,),one=True) if sid else None
     if not event or not student: flash('Payment event or student was not found.','danger'); return redirect(url_for('finance_dashboard'))
-    poster=current_user()['id']; pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(sid,event['amount'],event['provider'],event['external_reference'],poster)); new_balance=max(0,float(student['balance'] or 0)-float(event['amount'])); execute("UPDATE students SET balance=?,payment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(new_balance,'Paid' if new_balance==0 else 'Pending',sid)); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,event_id)); audit(current_user()['id'],current_user()['full_name'],'Match External Payment',f'External payment {event["external_reference"]} matched to {student["admission_no"]}.'); flash('External payment matched and posted.','success'); return redirect(url_for('finance_dashboard'))
+    poster=current_user()['id']; pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(sid,event['amount'],event['provider'],event['external_reference'],poster)); recalculate_student_balance(sid); new_balance=float(q("SELECT balance FROM students WHERE id=?",(sid,),one=True)['balance'] or 0); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,event_id)); audit(current_user()['id'],current_user()['full_name'],'Match External Payment',f'External payment {event["external_reference"]} matched to {student["admission_no"]}.'); flash('External payment matched and posted.','success'); return redirect(url_for('finance_dashboard'))
 
 @app.route("/allocate", methods=["GET","POST"])
 @login_required
@@ -3831,7 +3954,7 @@ def finance_fee_structure():
 def finance_apply_fee():
     sid=request.form.get('student_id',type=int); fid=request.form.get('fee_structure_id',type=int); student=q('SELECT * FROM students WHERE id=? AND active=1',(sid,),one=True); fee=q('SELECT * FROM fee_structures WHERE id=? AND active=1',(fid,),one=True)
     if not student or not fee: flash('Student or fee structure not found.','danger'); return redirect(url_for('finance_dashboard'))
-    execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(sid,fid,float(fee['amount']),fee['item_name'],current_user()['id'])); new_balance=float(student['balance'] or 0)+float(fee['amount']); execute("UPDATE students SET balance=?,payment_status='Pending',updated_at=CURRENT_TIMESTAMP WHERE id=?",(new_balance,sid)); flash('Fee charge applied and student balance recalculated.','success'); return redirect(url_for('finance_dashboard'))
+    execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(sid,fid,float(fee['amount']),fee['item_name'],current_user()['id'])); recalculate_student_balance(sid); flash('Fee charge applied and student balance recalculated.','success'); return redirect(request.referrer or url_for('finance_dashboard'))
 
 @app.route("/finance/integration",methods=['POST'])
 @login_required
@@ -3856,8 +3979,90 @@ def payments_webhook(provider):
     if cfg['auto_match'] and student:
         poster=q("SELECT id FROM users WHERE role='Admin' AND active=1 ORDER BY id LIMIT 1",one=True); poster_id=poster['id'] if poster else None
         if poster_id:
-            pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(student['id'],amount,provider,ref,poster_id)); new_balance=max(0,float(student['balance'] or 0)-amount); execute("UPDATE students SET balance=?,payment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(new_balance,'Paid' if new_balance==0 else 'Pending',student['id'])); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(student['id'],eid)); return jsonify({'ok':True,'matched':True,'payment_id':pid})
+            pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(student['id'],amount,provider,ref,poster_id)); recalculate_student_balance(student['id']); new_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(student['id'],eid)); return jsonify({'ok':True,'matched':True,'payment_id':pid})
     return jsonify({'ok':True,'matched':False,'event_id':eid})
+
+
+@app.route('/finance/transport-rate', methods=['POST'])
+@login_required
+@role_required('Admin','Finance')
+def finance_transport_rate():
+    zone=(request.form.get('zone_name') or '').strip();
+    try: amount=max(0,float(request.form.get('amount','0') or 0))
+    except ValueError: amount=-1
+    period=(request.form.get('period') or 'Term 1').strip() or 'Term 1'
+    if not zone or amount<0:
+        flash('Enter a transport zone and valid charge.','danger'); return redirect(request.referrer or url_for('finance_dashboard'))
+    conn=get_db(); conn.execute('INSERT INTO transport_rates(zone_name,amount,period,active,created_by) VALUES(?,?,?,?,?) ON CONFLICT(zone_name) DO UPDATE SET amount=excluded.amount,period=excluded.period,active=1,created_by=excluded.created_by',(zone,amount,period,current_user()['id'],)); conn.commit()
+    flash('Transport charge saved. New learners in that zone can be charged automatically.','success'); return redirect(request.referrer or url_for('finance_dashboard'))
+
+@app.route('/admin/promotions', methods=['GET'])
+@login_required
+@role_required('Admin')
+def admin_promotions():
+    students=q("SELECT id,full_name,admission_no,grade,balance,payment_status,active FROM students WHERE active=1 ORDER BY grade,full_name")
+    runs=q("SELECT r.*,COUNT(i.id) AS items_count FROM promotion_runs r LEFT JOIN promotion_items i ON i.run_id=r.id GROUP BY r.id ORDER BY r.id DESC LIMIT 20")
+    return render_template('admin_promotions.html',settings=school_settings(),students=students,runs=runs,actor_name=current_user()['full_name'],role='Admin',current_year=datetime.utcnow().year,today=datetime.utcnow().strftime('%Y-%m-%d'))
+
+@app.route('/admin/promotions/apply', methods=['POST'])
+@login_required
+@role_required('Admin')
+def admin_promotions_apply():
+    ids=[int(x) for x in request.form.getlist('student_ids') if str(x).isdigit()]
+    decision=request.form.get('decision','Promote').strip().title()
+    year=(request.form.get('academic_year') or datetime.utcnow().strftime('%Y')).strip()
+    effective=(request.form.get('effective_date') or datetime.utcnow().strftime('%Y-%m-%d')).strip()
+    if not ids: flash('Select at least one learner.','warning'); return redirect(url_for('admin_promotions'))
+    run_id=execute("INSERT INTO promotion_runs(academic_year,effective_date,status,created_by) VALUES(?,?,?,?)",(year,effective,'Completed',current_user()['id']))
+    changed=0
+    for sid in ids:
+        st=q('SELECT * FROM students WHERE id=? AND active=1',(sid,),one=True)
+        if not st: continue
+        target=next_grade_for(st['grade']) if decision=='Promote' else st['grade']
+        item_decision=decision
+        if decision=='Promote' and not target:
+            target='Graduated'; st_target='Graduated'; item_decision='Graduate'
+        elif decision=='Graduate': target='Graduated'; st_target='Graduated'
+        elif decision=='Repeat': target=st['grade']; st_target=st['grade']
+        elif decision=='Transfer': target='Transferred'; st_target='Transferred'
+        else: st_target=target
+        execute('INSERT INTO promotion_items(run_id,student_id,from_grade,to_grade,decision,notes) VALUES(?,?,?,?,?,?)',(run_id,sid,st['grade'],target,item_decision,(request.form.get('notes') or '').strip()))
+        execute("UPDATE students SET promoted_from_grade=?, academic_year=?, grade=?, last_promotion_action=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",(st['grade'],year,st_target,item_decision,sid))
+        changed+=1
+    flash(f'Promotion cycle completed for {changed} learner(s).','success'); return redirect(url_for('admin_promotions'))
+
+@app.route('/admin/bulk-students', methods=['POST'])
+@login_required
+@role_required('Admin')
+def admin_bulk_students():
+    ids=[int(x) for x in request.form.getlist('student_ids') if str(x).isdigit()]
+    action=(request.form.get('action') or '').strip().lower()
+    if not ids: flash('Select at least one learner first.','warning'); return redirect(request.referrer or url_for('admin_dashboard'))
+    if action=='archive':
+        for sid in ids: execute('UPDATE students SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?',(sid,))
+        flash(f'{len(ids)} learner(s) archived.','success')
+    elif action=='promote':
+        for sid in ids:
+            st=q('SELECT grade FROM students WHERE id=? AND active=1',(sid,),one=True); target=next_grade_for(st['grade']) if st else ''
+            if target: execute("UPDATE students SET promoted_from_grade=grade,grade=?,last_promotion_action='Promote',updated_at=CURRENT_TIMESTAMP WHERE id=?",(target,sid))
+        flash(f'{len(ids)} learner(s) moved to their next mapped class.','success')
+    else: flash('Unknown bulk learner action.','danger')
+    return redirect(request.referrer or url_for('admin_dashboard'))
+
+@app.route('/finance/payroll/bulk', methods=['POST'])
+@login_required
+@role_required('Admin','Finance')
+def finance_payroll_bulk():
+    ids=[int(x) for x in request.form.getlist('user_ids') if str(x).isdigit()]
+    try: amount=float(request.form.get('amount','0') or 0)
+    except ValueError: amount=0
+    if not ids or amount<=0:
+        flash('Select staff and enter a valid common salary amount.','danger'); return redirect(request.referrer or url_for('finance_dashboard'))
+    for uid in ids:
+        staff=q("SELECT id FROM users WHERE id=? AND active=1 AND role NOT IN ('Student','Parent','System')",(uid,),one=True)
+        if staff:
+            execute("INSERT INTO finance_ledger(entry_type,category,payee_user_id,amount,description,reference_no,posted_by) VALUES('Payroll','Salary / Bulk Payroll',?,?,?,?,?)",(uid,amount,'Common salary batch payment','BULK-'+datetime.utcnow().strftime('%Y%m%d'),current_user()['id']))
+    flash(f'Bulk payroll posted for {len(ids)} staff member(s).','success'); return redirect(request.referrer or url_for('finance_dashboard'))
 
 @app.route("/coming-soon/<feature>")
 def coming_soon(feature: str):
@@ -4347,7 +4552,7 @@ def finance_dashboard():
     ledger_income=q("SELECT COALESCE(SUM(amount),0) AS n FROM finance_ledger WHERE status='Posted' AND entry_type='Income'",one=True)["n"]
     ledger_expense=q("SELECT COALESCE(SUM(amount),0) AS n FROM finance_ledger WHERE status='Posted' AND entry_type IN ('Expense','Payroll')",one=True)["n"]
     account=q("SELECT * FROM finance_accounts WHERE id=1",one=True)
-    system_balance=float(account["opening_balance"] if account else 0)+float(ledger_income or 0)-float(ledger_expense or 0)
+    system_balance=float(account["opening_balance"] if account else 0)+float(total_income or 0)+float(ledger_income or 0)-float(ledger_expense or 0)
     employees=q("SELECT id,full_name,username,role,title,department FROM users WHERE active=1 AND role NOT IN ('System','Student','Parent') ORDER BY full_name")
     fee_structures=q("SELECT * FROM fee_structures WHERE active=1 ORDER BY class_level,item_name")
     fee_charges=q("SELECT c.*,s.full_name,s.admission_no FROM fee_charges c JOIN students s ON s.id=c.student_id ORDER BY c.created_at DESC LIMIT 80")
@@ -5095,13 +5300,18 @@ def save_settings():
         school_fee = float(request.form.get("school_fee", "0") or 0)
     except ValueError:
         school_fee = 0.0
+    student_email_domain = (request.form.get("student_email_domain") or "school.ac.ke").strip().lstrip("@").lower() or "school.ac.ke"
+    public_location_title = (request.form.get("public_location_title") or "Visit us today at this location").strip()
+    public_address = (request.form.get("public_address") or "").strip()
+    public_location_notes = (request.form.get("public_location_notes") or "").strip()
+    public_map_query = (request.form.get("public_map_query") or "").strip()
     execute(
         """
         UPDATE school_settings
-        SET school_name = ?, admission_prefix = ?, admission_suffix = ?, student_name_prefix = ?, student_name_suffix = ?, currency_code = ?, school_fee = ?
+        SET school_name = ?, admission_prefix = ?, admission_suffix = ?, student_name_prefix = ?, student_name_suffix = ?, currency_code = ?, school_fee = ?, student_email_domain = ?, public_location_title = ?, public_address = ?, public_location_notes = ?, public_map_query = ?
         WHERE id = 1
         """,
-        (school_name, admission_prefix, admission_suffix, student_name_prefix, student_name_suffix, currency_code, school_fee),
+        (school_name, admission_prefix, admission_suffix, student_name_prefix, student_name_suffix, currency_code, school_fee, student_email_domain, public_location_title, public_address, public_location_notes, public_map_query),
     )
     audit(current_user()["id"], current_user()["full_name"], "Update Settings", f"School settings updated for {school_name}.")
     flash("School settings updated.", "success")
@@ -5127,7 +5337,13 @@ def add_student():
     age = (request.form.get("age") or "").strip()
     fields = {name: (request.form.get(name) or "").strip() for name in (
         "guardian_name","guardian_phone","guardian_email","alt_guardian_name","alt_guardian_phone","alt_guardian_email",
-        "student_phone","student_email","medical_condition","allergies","special_info","notes")}
+        "student_phone","student_email","medical_condition","allergies","special_info","notes",
+        "address","date_of_birth","gender","id_reference","emergency_contact","blood_group","medical_notes")}
+    transport_zone=(request.form.get('transport_zone') or '').strip()
+    uses_bus=1 if request.form.get('uses_school_bus') in {'1','on','yes'} else 0
+    meal_plan=(request.form.get('meal_plan') or 'None').strip() or 'None'
+    fee_override=request.form.get('fee_override_total','').strip()
+    fee_override_enabled=bool(fee_override)
 
     if not full_name or not grade:
         flash("Student name and grade are required. All other fields may be left blank.", "danger")
@@ -5146,24 +5362,47 @@ def add_student():
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     fee = float(settings["school_fee"] or 0)
+    try:
+        manual_fee=float(fee_override) if fee_override else None
+    except ValueError:
+        manual_fee=None; fee_override_enabled=False
+    if manual_fee is not None:
+        fee=manual_fee
+    transport_charge=0.0
+    if uses_bus and transport_zone:
+        tr=q('SELECT amount FROM transport_rates WHERE zone_name=? AND active=1 LIMIT 1',(transport_zone,),one=True)
+        transport_charge=float(tr['amount'] or 0) if tr else 0.0
+    meal_charge=float(request.form.get('meal_charge','0') or 0) if meal_plan!='None' else 0.0
+    if fee_override_enabled:
+        assessed=fee
+    else:
+        assessed=fee + transport_charge + meal_charge
+    generated_email=student_email_for(admission_no, fields['student_email'])
     student_id = None
     warnings = []
     try:
         student_id = execute("""INSERT INTO students(
             admission_no,full_name,grade,age,guardian_name,guardian_phone,guardian_email,
-            alt_guardian_name,alt_guardian_phone,alt_guardian_email,student_phone,student_email,
-            medical_condition,allergies,special_info,notes,payment_status,balance,active)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+            alt_guardian_name,alt_guardian_phone,alt_guardian_email,student_phone,student_email,address,date_of_birth,gender,id_reference,emergency_contact,blood_group,medical_notes,
+            medical_condition,allergies,special_info,notes,payment_status,balance,fee_assessed_total,fee_override_enabled,transport_zone,uses_school_bus,meal_plan,transport_charge,active)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (admission_no,full_name,grade,age,fields["guardian_name"],fields["guardian_phone"],fields["guardian_email"],
-             fields["alt_guardian_name"],fields["alt_guardian_phone"],fields["alt_guardian_email"],fields["student_phone"],fields["student_email"],
-             fields["medical_condition"],fields["allergies"],fields["special_info"],fields["notes"],"Pending",fee))
+             fields["alt_guardian_name"],fields["alt_guardian_phone"],fields["alt_guardian_email"],generated_email,generated_email,fields['address'],fields['date_of_birth'],fields['gender'],fields['id_reference'],fields['emergency_contact'],fields['blood_group'],fields['medical_notes'],
+             fields["medical_condition"],fields["allergies"],fields["special_info"],fields["notes"],"Pending",assessed,assessed,1 if fee_override_enabled else 0,transport_zone,uses_bus,meal_plan,transport_charge))
+        if not fee_override_enabled:
+            if fee > 0:
+                fid=execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,fee,'Tuition / core school fee',actor['id']))
+            if transport_charge > 0:
+                execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,transport_charge,'School transport — '+transport_zone,actor['id']))
+            if meal_charge > 0:
+                execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,meal_charge,'Meal plan — '+meal_plan,actor['id']))
 
         # Optional portal account: never let a secondary account/schema problem
         # undo the authoritative learner record.
         try:
             username = admission_no.lower()
-            execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title) VALUES(?,?,?,?,?,1,?,?)",
-                    (full_name,username,generate_password_hash(admission_no),"Student",student_id,"Student","Student"))
+            execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title,email) VALUES(?,?,?,?,?,1,?,?,?)",
+                    (full_name,username,generate_password_hash(admission_no),"Student",student_id,"Student","Student",generated_email))
         except Exception as exc:
             warnings.append("student portal account setup skipped")
             app.logger.warning("Student %s saved but portal account setup was skipped: %s", student_id, exc)
@@ -5320,78 +5559,57 @@ def student_search():
 @login_required
 @role_required("Admin", "ICT")
 def update_student(student_id: int):
-    student = q("SELECT * FROM students WHERE id = ?", (student_id,), one=True)
-    if not student:
-        abort(404)
-    fields = {
-        "full_name": request.form.get("full_name", student["full_name"] or "").strip() or student["full_name"],
-        "admission_no": request.form.get("admission_no", student["admission_no"] or "").strip() or student["admission_no"],
-        "grade": request.form.get("grade", student["grade"] or "").strip() or student["grade"],
-        "age": request.form.get("age", student["age"] or "").strip(),
-        "guardian_name": request.form.get("guardian_name", student["guardian_name"] or "").strip(),
-        "guardian_phone": request.form.get("guardian_phone", student["guardian_phone"] or "").strip(),
-        "guardian_email": request.form.get("guardian_email", student["guardian_email"] or "").strip(),
-        "alt_guardian_name": request.form.get("alt_guardian_name", student["alt_guardian_name"] or "").strip(),
-        "alt_guardian_phone": request.form.get("alt_guardian_phone", student["alt_guardian_phone"] or "").strip(),
-        "alt_guardian_email": request.form.get("alt_guardian_email", student["alt_guardian_email"] or "").strip(),
-        "student_phone": request.form.get("student_phone", student["student_phone"] or "").strip(),
-        "student_email": request.form.get("student_email", student["student_email"] or "").strip(),
-        "medical_condition": request.form.get("medical_condition", student["medical_condition"] or "").strip(),
-        "allergies": request.form.get("allergies", student["allergies"] or "").strip(),
-        "special_info": request.form.get("special_info", student["special_info"] or "").strip(),
-        "notes": request.form.get("notes", student["notes"] or "").strip(),
-        "payment_status": request.form.get("payment_status", student["payment_status"] or "Pending").strip() or (student["payment_status"] or "Pending"),
-        "balance": request.form.get("balance", str(student["balance"] or 0)).strip(),
-        "active": 1 if request.form.get("active", "1" if student["active"] else "0") == "1" else 0,
-    }
+    student=q("SELECT * FROM students WHERE id=?",(student_id,),one=True)
+    if not student: abort(404)
+    def val(name, fallback=""):
+        return request.form.get(name, fallback if fallback is not None else "").strip()
+    full_name=val("full_name",student["full_name"]) or student["full_name"]
+    admission_no=val("admission_no",student["admission_no"]) or student["admission_no"]
+    grade=normalize_grade(val("grade",student["grade"]) or student["grade"])
+    age=val("age",student["age"])
+    fields={k:val(k,student[k] if k in student.keys() else "") for k in [
+        "guardian_name","guardian_phone","guardian_email","alt_guardian_name","alt_guardian_phone","alt_guardian_email",
+        "student_phone","student_email","address","date_of_birth","gender","id_reference","emergency_contact","blood_group",
+        "medical_condition","medical_notes","allergies","special_info","notes"]}
+    active=1 if request.form.get("active","1" if student["active"] else "0")=="1" else 0
+    transport_zone=val("transport_zone",student["transport_zone"] if "transport_zone" in student.keys() else "")
+    uses_bus=1 if request.form.get("uses_school_bus","1" if int(student["uses_school_bus"] or 0) else "0")=="1" else 0
+    meal_plan=val("meal_plan",student["meal_plan"] if "meal_plan" in student.keys() else "None") or "None"
+    try: meal_charge=max(0,float(request.form.get("meal_charge",0) or 0))
+    except ValueError: meal_charge=float(student["meal_charge"] or 0) if "meal_charge" in student.keys() else 0.0
+    try: fee_total=max(0,float(request.form.get("fee_assessed_total",student["fee_assessed_total"] or 0) or 0))
+    except ValueError: fee_total=float(student["fee_assessed_total"] or 0)
+    override=1 if request.form.get("fee_override_enabled","1" if int(student["fee_override_enabled"] or 0) else "0")=="1" else 0
+    tr=q("SELECT amount FROM transport_rates WHERE zone_name=? AND active=1 LIMIT 1",(transport_zone,),one=True) if uses_bus and transport_zone else None
+    transport_charge=float(tr["amount"] or 0) if tr else 0.0
     old_admission=student["admission_no"] or ""
-    linked_student_user=q("SELECT id,password_hash FROM users WHERE student_id=? AND role='Student' AND active=1 LIMIT 1", (student_id,), one=True)
-    execute(
-        """
-        UPDATE students SET
-            admission_no = ?, full_name = ?, grade = ?, age = ?, grade_category = ?, guardian_name = ?, guardian_phone = ?, guardian_email = ?,
-            alt_guardian_name = ?, alt_guardian_phone = ?, alt_guardian_email = ?, student_phone = ?, student_email = ?,
-            medical_condition = ?, allergies = ?, special_info = ?, notes = ?,
-            payment_status = ?, balance = ?, active = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """,
-        (
-            fields["admission_no"],
-            fields["full_name"],
-            fields["grade"],
-            fields["age"],
-            fields["grade"],
-            fields["guardian_name"],
-            fields["guardian_phone"],
-            fields["guardian_email"],
-            fields["alt_guardian_name"],
-            fields["alt_guardian_phone"],
-            fields["alt_guardian_email"],
-            fields["student_phone"],
-            fields["student_email"],
-            fields["medical_condition"],
-            fields["allergies"],
-            fields["special_info"],
-            fields["notes"],
-            fields["payment_status"],
-            float(fields["balance"] or 0),
-            fields["active"],
-            student_id,
-        ),
-    )
-    if linked_student_user:
-        try:
-            bootstrap=bool(old_admission) and check_password_hash(linked_student_user["password_hash"], old_admission)
-        except Exception:
-            bootstrap=False
-        if bootstrap:
-            execute("UPDATE users SET username=?, full_name=?, password_hash=? WHERE id=?", (fields["admission_no"], fields["full_name"], generate_password_hash(fields["admission_no"]), linked_student_user["id"]))
+    if not fields["student_email"]:
+        fields["student_email"]=student_email_for(admission_no)
+    try:
+        execute("""UPDATE students SET admission_no=?,full_name=?,grade=?,age=?,grade_category=?,guardian_name=?,guardian_phone=?,guardian_email=?,alt_guardian_name=?,alt_guardian_phone=?,alt_guardian_email=?,student_phone=?,student_email=?,address=?,date_of_birth=?,gender=?,id_reference=?,emergency_contact=?,blood_group=?,medical_condition=?,medical_notes=?,allergies=?,special_info=?,notes=?,active=?,fee_assessed_total=?,fee_override_enabled=?,transport_zone=?,uses_school_bus=?,meal_plan=?,transport_charge=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            (admission_no,full_name,grade,age,grade,fields["guardian_name"],fields["guardian_phone"],fields["guardian_email"],fields["alt_guardian_name"],fields["alt_guardian_phone"],fields["alt_guardian_email"],fields["student_phone"],fields["student_email"],fields["address"],fields["date_of_birth"],fields["gender"],fields["id_reference"],fields["emergency_contact"],fields["blood_group"],fields["medical_condition"],fields["medical_notes"],fields["allergies"],fields["special_info"],fields["notes"],active,fee_total,override,transport_zone,uses_bus,meal_plan,transport_charge,student_id))
+        if not override:
+            # Replace the current auto-generated transport/meal charges, while leaving manually-added fee items intact.
+            execute("DELETE FROM fee_charges WHERE student_id=? AND (description LIKE 'School transport — %' OR description LIKE 'Meal plan — %')",(student_id,))
+            if transport_charge>0: execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,transport_charge,'School transport — '+transport_zone,current_user()["id"]))
+            if meal_plan!="None" and meal_charge>0: execute("INSERT INTO fee_charges(student_id,fee_structure_id,amount,description,created_by) VALUES(?,?,?,?,?)",(student_id,None,meal_charge,'Meal plan — '+meal_plan,current_user()["id"]))
         else:
-            execute("UPDATE users SET full_name=? WHERE id=?", (fields["full_name"], linked_student_user["id"]))
-    audit(current_user()["id"], current_user()["full_name"], "Edit Student", f"Student {student['admission_no']} updated.")
-    flash("Student updated.", "success")
-    return redirect(request.referrer or url_for("dashboard", student_id=student_id))
-
+            # In override mode the supplied total is authoritative; no synthetic charges are needed.
+            execute("UPDATE students SET fee_assessed_total=? WHERE id=?",(fee_total,student_id))
+        recalculate_student_balance(student_id)
+        linked=q("SELECT id,password_hash FROM users WHERE student_id=? AND role='Student' AND active=1 LIMIT 1",(student_id,),one=True)
+        if linked:
+            try: bootstrap=bool(old_admission) and check_password_hash(linked["password_hash"],old_admission)
+            except Exception: bootstrap=False
+            if bootstrap: execute("UPDATE users SET username=?,full_name=?,email=?,password_hash=? WHERE id=?",(admission_no,full_name,fields["student_email"],generate_password_hash(admission_no),linked["id"]))
+            else: execute("UPDATE users SET full_name=?,email=? WHERE id=?",(full_name,fields["student_email"],linked["id"]))
+        else:
+            execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title,email) VALUES(?,?,?,?,?,1,?,?,?)",(full_name,admission_no,generate_password_hash(admission_no),"Student",student_id,"Student","Student",fields["student_email"]))
+        audit(current_user()["id"],current_user()["full_name"],"Update Student",f"Updated {full_name} ({admission_no}); balance recalculated from charges/payments.")
+        flash("Learner updated. Fees, payments and transport have been reconciled automatically.","success")
+    except Exception as exc:
+        app.logger.exception("Student update failed: %s",exc); flash("Learner could not be updated safely.","danger")
+    return redirect(url_for("student_profile",student_id=student_id)+"#edit")
 
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
 @login_required
@@ -5432,9 +5650,8 @@ def add_payment():
         "INSERT INTO payments(student_id, amount, method, reference_no, recorded_by, status) VALUES (?, ?, ?, ?, ?, 'Posted')",
         (student["id"], amount_f, method, reference_no, current_user()["id"]),
     )
-    new_balance = max(0, float(student["balance"]) - amount_f)
-    new_status = "Paid" if new_balance == 0 else "Pending"
-    execute("UPDATE students SET balance = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_balance, new_status, student["id"]))
+    recalculate_student_balance(student["id"])
+    new_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0)
     audit(current_user()["id"], current_user()["full_name"], "Record Payment", f"{amount_f:.2f} recorded for {student['admission_no']} using {method}.")
     flash("Payment recorded.", "success")
     return redirect(request.referrer or url_for("dashboard", student_id=student["id"]))
@@ -5453,8 +5670,8 @@ def reverse_payment(payment_id: int):
     execute("UPDATE payments SET status = 'Reversed', reversed_at = CURRENT_TIMESTAMP WHERE id = ?", (payment_id,))
     student = q("SELECT * FROM students WHERE id = ?", (payment["student_id"],), one=True)
     if student:
-        updated_balance = float(student["balance"]) + float(payment["amount"])
-        execute("UPDATE students SET balance = ?, payment_status = 'Pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (updated_balance, student["id"]))
+        recalculate_student_balance(student["id"])
+        updated_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0)
     audit(current_user()["id"], current_user()["full_name"], "Reverse Payment", f"Payment #{payment_id} reversed.")
     flash("Payment reversed.", "success")
     return redirect(request.referrer or url_for("admin_dashboard"))
@@ -5476,7 +5693,7 @@ def finance_record_payment():
         receipt_dir=UPLOAD_DIR/"receipts"; receipt_dir.mkdir(exist_ok=True)
         name=f"receipt-{student['id']}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}.{ext}"; file.save(receipt_dir/name); receipt_path="uploads/receipts/"+name
     payment_id=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status,receipt_path) VALUES(?,?,?,?,?,'Posted',?)",(student['id'],amount,method,reference,current_user()['id'],receipt_path))
-    new_balance=max(0,float(student['balance'] or 0)-amount); execute("UPDATE students SET balance=?,payment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(new_balance,'Paid' if new_balance==0 else 'Pending',student['id']))
+    recalculate_student_balance(student['id']); new_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0)
     audit(current_user()['id'],current_user()['full_name'],'Finance Payment',f"Payment #{payment_id}: {amount:.2f} for {student['admission_no']}; balance {new_balance:.2f}.")
     flash("Payment posted and the student/parent balance has been updated.","success"); return redirect(url_for("finance_dashboard"))
 
@@ -5517,7 +5734,7 @@ def finance_reject_results(batch_id):
 @login_required
 @role_required("Finance", "Admin")
 def finance_policy():
-    try: limit=max(0,float(request.form.get('result_download_balance_limit','500') or 500))
+    try: limit=max(0,float(request.form.get('result_download_balance_limit','0') or 0))
     except ValueError: limit=500
     execute("UPDATE school_settings SET result_download_balance_limit=? WHERE id=1",(limit,)); audit(current_user()['id'],current_user()['full_name'],'Finance Policy',f"Result download balance limit set to {limit:.2f}."); flash("Result download threshold updated.","success"); return redirect(url_for('finance_dashboard'))
 
@@ -5761,7 +5978,7 @@ def add_parent_account():
             flash(f"Parent contact saved for {len(students)} student(s). Portal access was left disabled.","success")
     except sqlite3.IntegrityError as exc:
         flash(f"Parent could not be saved: {exc}","danger")
-    return redirect(url_for("admin_dashboard")+"#admin-add-student")
+    return redirect(request.referrer or (url_for("admin_dashboard")+"#admin-add-student"))
 
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
@@ -6353,7 +6570,7 @@ def backup_json_download():
     payload=_json_backup_payload(include_assets=True)
     raw=json.dumps(payload,ensure_ascii=False,indent=2).encode('utf-8')
     name=f"prime-institution-full-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
-    execute("INSERT INTO backup_registry(backup_type,file_name,row_count,created_by) VALUES(?,?,?,?)",("JSON",name,sum(v.get('row_count',0) if isinstance(v,dict) else 0 for v in []),current_user()["id"]))
+    execute("INSERT INTO backup_registry(backup_type,file_name,row_count,created_by) VALUES(?,?,?,?)",("JSON",name,sum(len(v.get('rows') or []) for v in payload.get('tables',{}).values() if isinstance(v,dict)),current_user()["id"]))
     return send_file(io.BytesIO(raw),mimetype='application/json',as_attachment=True,download_name=name)
 
 @app.route("/backup/json/restore", methods=["POST"])
@@ -6420,71 +6637,44 @@ def backup_download():
 @login_required
 @admin_root_required
 def backup_restore():
-    file = request.files.get("backup_file")
+    file=request.files.get('backup_file')
     if not file or not file.filename:
-        flash("Choose a backup file first.", "danger")
-        return redirect(request.referrer or url_for("admin_dashboard"))
-    filename_lower=file.filename.lower()
-    if filename_lower.endswith(".json"):
-        try:
-            payload=json.load(file.stream)
-            if payload.get('format')!='Prime Institution OS Full System JSON' or not isinstance(payload.get('tables'),dict):
-                raise ValueError('This is not a valid Prime Institution OS full backup.')
-            conn=get_db(); old_autocommit=conn.isolation_level
-            try:
-                session['_restore_actor_username']=current_user()['username']; conn.execute('PRAGMA foreign_keys=OFF'); conn.execute('BEGIN')
-                existing=_backup_tables()
-                for table in existing: conn.execute(f'DELETE FROM [{table}]')
-                for table,data in payload['tables'].items():
-                    if table.startswith('sqlite_') or table not in existing: continue
-                    columns=data.get('columns') or []; valid=[c for c in columns if c in table_columns(conn,table)]
-                    for row in data.get('rows') or []:
-                        if not valid: continue
-                        conn.execute(f"INSERT INTO [{table}] ({','.join('['+c+']' for c in valid)}) VALUES ({','.join('?' for _ in valid)})",[row.get(c) for c in valid])
-                for asset in payload.get('assets') or []:
-                    rel=str(asset.get('path','')); target=(DATA_DIR/rel).resolve(); root=UPLOAD_DIR.resolve()
-                    if not rel.startswith('uploads/') or root not in target.parents: continue
-                    target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(base64.b64decode(asset.get('data_base64','')))
-                conn.commit(); conn.execute('PRAGMA foreign_keys=ON'); init_db(); flash('Full JSON backup restored successfully.','success')
-            except Exception:
-                conn.rollback(); conn.execute('PRAGMA foreign_keys=ON'); raise
-            finally: conn.isolation_level=old_autocommit
-        except Exception as exc:
-            flash(f'JSON restore failed safely: {exc}','danger')
-        return redirect(request.referrer or url_for('admin_dashboard'))
+        flash('Choose a backup file first.','danger'); return redirect(request.referrer or url_for('admin_dashboard'))
+    if file.filename.lower().endswith('.json'):
+        return backup_json_restore()
     if not allowed_filename(file.filename):
-        flash("Only .db, .sqlite, or .sqlite3 database backups are allowed.", "danger")
-        return redirect(request.referrer or url_for("admin_dashboard"))
-    safe_name = secure_filename(file.filename)
-    temp_path = UPLOAD_DIR / safe_name
-    file.save(temp_path)
-    old_db=None
+        flash('Only .db, .sqlite or .sqlite3 database backups are allowed.','danger'); return redirect(request.referrer or url_for('admin_dashboard'))
+    safe_name=secure_filename(file.filename)
+    temp=UPLOAD_DIR/(safe_name+'.incoming')
+    file.save(temp)
+    old_db=DB_PATH.with_suffix('.pre-restore.bak')
     try:
-        with sqlite3.connect(temp_path) as test_conn:
-            integrity=(test_conn.execute("PRAGMA integrity_check").fetchone() or [""])[0]
-            required={"users","students","school_settings","payments","exam_batches","exam_results"}
-            present={r[0] for r in test_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            if integrity != "ok" or not required.issubset(present):
-                raise ValueError("The selected file is not a valid School Portal backup.")
-        backup_old = DB_PATH.with_suffix(".bak")
-        if DB_PATH.exists():
-            if backup_old.exists(): backup_old.unlink()
-            DB_PATH.replace(backup_old)
-            old_db=backup_old
-        temp_path.replace(DB_PATH)
+        with sqlite3.connect(temp,timeout=30) as test:
+            if (test.execute('PRAGMA integrity_check').fetchone() or [''])[0].lower()!='ok': raise ValueError('SQLite integrity check failed.')
+            present={r[0] for r in test.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            required={'users','students','school_settings','payments','exam_batches','exam_results'}
+            if not required.issubset(present): raise ValueError('The selected database is missing required Prime tables.')
+        # Never replace an SQLite file while a Flask request-scoped connection still owns it.
+        db=g.pop('db',None)
+        if db is not None: db.close()
+        for suffix in ('-wal','-shm'):
+            DB_PATH.with_name(DB_PATH.name+suffix).unlink(missing_ok=True)
+        if old_db.exists(): old_db.unlink()
+        if DB_PATH.exists(): DB_PATH.replace(old_db)
+        temp.replace(DB_PATH)
         try:
             init_db()
+            audit(current_user()['id'],current_user()['full_name'],'Restore Backup',f'Backup restored from {safe_name}.')
         except Exception:
             if DB_PATH.exists(): DB_PATH.unlink()
-            if old_db and old_db.exists(): old_db.replace(DB_PATH)
+            if old_db.exists(): old_db.replace(DB_PATH)
             init_db()
             raise
-        flash("Backup restored successfully. The previous database was retained as a rollback copy.", "success")
-        audit(current_user()["id"], current_user()["full_name"], "Restore Backup", f"Backup restored from {safe_name}.")
+        flash('Backup restored safely. The previous database was retained as a rollback copy.','success')
     except Exception as exc:
-        if temp_path.exists(): temp_path.unlink(missing_ok=True)
-        flash(f"Restore failed safely: {exc}", "danger")
-    return redirect(request.referrer or url_for("admin_dashboard"))
+        temp.unlink(missing_ok=True)
+        flash(f'Restore failed safely: {exc}','danger')
+    return redirect(request.referrer or url_for('admin_dashboard'))
 
 
 @app.route("/uploads/<path:filename>")

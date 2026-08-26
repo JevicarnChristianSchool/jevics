@@ -3248,19 +3248,74 @@ def flashcards_review(deck_id:int):
 @login_required
 @role_required("Admin","ICT")
 def admin_subjects():
+    actor=current_user()
     if request.method=='POST':
-        subject=request.form.get('subject','').strip(); dept=request.form.get('department','').strip(); scope=request.form.get('level_scope','All').strip() or 'All'
-        if not subject:
-            flash('Subject name is required.','danger')
-        else:
-            try:
-                execute("INSERT INTO subjects_catalog(subject,department,level_scope,description,created_by) VALUES(?,?,?,?,?)",(subject,dept,scope,request.form.get('description','').strip(),current_user()['id']))
-                flash('Subject published for registration and teaching assignments.','success')
-            except sqlite3.IntegrityError:
-                flash('That subject already exists.','warning')
+        action=request.form.get('action','').strip()
+        if action == 'add_subject':
+            subject=request.form.get('subject','').strip(); dept=request.form.get('department','').strip(); scope=request.form.get('level_scope','All').strip() or 'All'
+            if not subject:
+                flash('Subject name is required.','danger')
+            else:
+                existing=q("SELECT id FROM subjects_catalog WHERE lower(trim(subject))=lower(trim(?)) LIMIT 1",(subject,),one=True)
+                if existing:
+                    execute("UPDATE subjects_catalog SET department=?,level_scope=?,description=?,active=1,created_by=? WHERE id=?",(dept,scope,request.form.get('description','').strip(),actor['id'],existing['id']))
+                    flash('Subject restored/updated and made available.','success')
+                else:
+                    execute("INSERT INTO subjects_catalog(subject,department,level_scope,description,created_by,active) VALUES(?,?,?,?,?,1)",(subject,dept,scope,request.form.get('description','').strip(),actor['id']))
+                    flash('Subject published for registration and teaching assignments.','success')
+        elif action == 'add_department':
+            name=request.form.get('department_name','').strip(); category=request.form.get('department_category','Academic').strip() or 'Academic'
+            if not name:
+                flash('Department name is required.','danger')
+            else:
+                existing=q("SELECT id FROM departments WHERE lower(trim(name))=lower(trim(?)) LIMIT 1",(name,),one=True)
+                if existing:
+                    execute("UPDATE departments SET category=?,active=1 WHERE id=?",(category,existing['id']))
+                    flash('Department restored/updated and made available.','success')
+                else:
+                    execute("INSERT INTO departments(name,category,active) VALUES(?,?,1)",(name,category))
+                    flash('Department added.','success')
+        elif action == 'deactivate_subjects':
+            ids=[]
+            for raw in request.form.getlist('subject_ids'):
+                try: ids.append(int(raw))
+                except (TypeError,ValueError): pass
+            if ids:
+                placeholders=','.join('?'*len(ids))
+                execute(f"UPDATE subjects_catalog SET active=0 WHERE id IN ({placeholders})",tuple(ids))
+                flash(f'{len(ids)} subject(s) removed from new selections. Existing academic records were preserved.','success')
+        elif action == 'deactivate_departments':
+            ids=[]
+            for raw in request.form.getlist('department_ids'):
+                try: ids.append(int(raw))
+                except (TypeError,ValueError): pass
+            if ids:
+                placeholders=','.join('?'*len(ids))
+                execute(f"UPDATE departments SET active=0 WHERE id IN ({placeholders})",tuple(ids))
+                flash(f'{len(ids)} department(s) removed from new selections. Existing assignments were preserved.','success')
+        elif action == 'restore_subjects':
+            ids=[]
+            for raw in request.form.getlist('subject_ids'):
+                try: ids.append(int(raw))
+                except (TypeError,ValueError): pass
+            if ids:
+                placeholders=','.join('?'*len(ids))
+                execute(f"UPDATE subjects_catalog SET active=1 WHERE id IN ({placeholders})",tuple(ids))
+                flash(f'{len(ids)} subject(s) restored.','success')
+        elif action == 'restore_departments':
+            ids=[]
+            for raw in request.form.getlist('department_ids'):
+                try: ids.append(int(raw))
+                except (TypeError,ValueError): pass
+            if ids:
+                placeholders=','.join('?'*len(ids))
+                execute(f"UPDATE departments SET active=1 WHERE id IN ({placeholders})",tuple(ids))
+                flash(f'{len(ids)} department(s) restored.','success')
         return redirect(url_for('admin_subjects'))
-    rows=q("SELECT s.*,COUNT(ss.id) AS learner_count FROM subjects_catalog s LEFT JOIN student_subjects ss ON ss.subject_id=s.id AND ss.status!='Dropped' GROUP BY s.id ORDER BY s.department,s.subject")
-    return render_template('admin_subjects.html',settings=school_settings(),rows=rows,actor_name=current_user()['full_name'],role=current_user()['role'])
+
+    rows=q("SELECT s.*,COUNT(ss.id) AS learner_count FROM subjects_catalog s LEFT JOIN student_subjects ss ON ss.subject_id=s.id AND ss.status!='Dropped' GROUP BY s.id ORDER BY s.active DESC,s.department,s.subject")
+    departments=q("SELECT d.*,COUNT(DISTINCT u.id) AS staff_count,COUNT(DISTINCT sd.student_id) AS learner_count FROM departments d LEFT JOIN users u ON u.department=d.name AND u.active=1 LEFT JOIN student_departments sd ON sd.department_id=d.id AND sd.status!='Dropped' GROUP BY d.id ORDER BY d.active DESC,d.name")
+    return render_template('admin_subjects.html',settings=school_settings(),rows=rows,departments=departments,actor_name=actor['full_name'],role=actor['role'])
 
 @app.route("/teacher/roster")
 @login_required

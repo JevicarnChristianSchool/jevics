@@ -2272,8 +2272,21 @@ def public_about_sections(settings):
             caption=str(item.get("caption", "")).strip()[:300]
             layout=item.get("layout", "reading")
             if layout not in {"reading","image-left","image-right","feature"}: layout="reading"
-            if title or body or image:
-                out.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout})
+            media=[]
+            raw_media=item.get("media", [])
+            if isinstance(raw_media, list):
+                for m in raw_media:
+                    if not isinstance(m, dict):
+                        continue
+                    path=str(m.get("path", "")).strip()[:600]
+                    kind=str(m.get("kind", "image")).strip().lower()
+                    cap=str(m.get("caption", "")).strip()[:300]
+                    if path and kind in {"image","video"}:
+                        media.append({"path":path,"kind":kind,"caption":cap})
+            if image and not media:
+                media=[{"path":image,"kind":"image","caption":caption}]
+            if title or body or image or media:
+                out.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout,"media":media})
         return out
     except Exception:
         return []
@@ -4637,9 +4650,8 @@ def institution():
 
 @app.route("/institution/save", methods=["POST"])
 @login_required
-@role_required("Admin", "ICT")
+@role_required("Admin")
 def institution_save():
-    values={k:request.form.get(k,"").strip() for k in ["institution_history","institution_performance","institution_religion","institution_affiliations","institution_help","institution_contact","institution_portal_guide","institution_admin_guide","institution_ict_guide","institution_finance_guide","institution_driver_guide_en","institution_driver_guide_sw"]}
     about_sections=[]
     try:
         raw_sections=json.loads(request.form.get("about_sections_json", "[]") or "[]")
@@ -4652,21 +4664,49 @@ def institution_save():
                 caption=str(item.get("caption","")).strip()[:300]
                 layout=item.get("layout","reading")
                 if layout not in {"reading","image-left","image-right","feature"}: layout="reading"
-                if title or body or image: about_sections.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout})
+                media=[]
+                raw_media=item.get("media",[])
+                if isinstance(raw_media,list):
+                    for m in raw_media:
+                        if not isinstance(m,dict): continue
+                        path=str(m.get("path","")).strip()[:600]; kind=str(m.get("kind","image")).strip().lower(); cap=str(m.get("caption","")).strip()[:300]
+                        if path and kind in {"image","video"}: media.append({"path":path,"kind":kind,"caption":cap})
+                if image and not media:
+                    media=[{"path":image,"kind":"image","caption":caption}]
+                if title or body or image or media:
+                    about_sections.append({"title":title,"body":body,"image":image,"caption":caption,"layout":layout,"media":media})
     except Exception:
         about_sections=[]
+    # Keep the old cover image field working.
     image=request.files.get("institution_image"); image_path=school_settings()["institution_image_path"] or ""
     if image and image.filename:
         dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True); fname=secure_filename(image.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image.save(out); image_path="uploads/institution/"+out.name
-    # Save optional images attached to individual About sections.
-    for i, item in enumerate(about_sections):
-        image_file=request.files.get(f"about_image_{i}")
-        if image_file and image_file.filename:
-            dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True)
-            fname=secure_filename(image_file.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image_file.save(out)
-            item["image"]="uploads/institution/"+out.name
-    execute("UPDATE school_settings SET institution_history=?, institution_performance=?, institution_religion=?, institution_affiliations=?, institution_help=?, institution_contact=?, institution_portal_guide=?, institution_admin_guide=?, institution_ict_guide=?, institution_finance_guide=?, institution_driver_guide_en=?, institution_driver_guide_sw=?, about_sections_json=?, institution_image_path=?, institution_enabled=1 WHERE id=1",(values["institution_history"],values["institution_performance"],values["institution_religion"],values["institution_affiliations"],values["institution_help"],values["institution_contact"],values["institution_portal_guide"],values["institution_admin_guide"],values["institution_ict_guide"],values["institution_finance_guide"],values["institution_driver_guide_en"],values["institution_driver_guide_sw"],json.dumps(about_sections, ensure_ascii=False),image_path))
-    flash("Institution information updated.","success"); return redirect(url_for("institution"))
+    # Attach multiple images/videos to each About section.
+    for i,item in enumerate(about_sections):
+        media=list(item.get("media",[]))
+        for uploaded in request.files.getlist(f"about_media_{i}"):
+            if not uploaded or not uploaded.filename: continue
+            ext=Path(uploaded.filename).suffix.lower()
+            if ext not in {".png",".jpg",".jpeg",".webp",".gif",".mp4",".webm",".mov"}: continue
+            dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True); fname=secure_filename(uploaded.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; uploaded.save(out)
+            kind="video" if ext in {".mp4",".webm",".mov"} else "image"
+            media.append({"path":"uploads/institution/"+out.name,"kind":kind,"caption":""})
+        item["media"]=media
+        if not item.get("image") and media:
+            first_image=next((m for m in media if m["kind"]=="image"),None)
+            if first_image: item["image"]=first_image["path"]; item["caption"]=first_image.get("caption","")
+    execute("UPDATE school_settings SET about_sections_json=?, institution_image_path=?, institution_enabled=1 WHERE id=1",(json.dumps(about_sections, ensure_ascii=False),image_path))
+    audit(current_user()["id"],current_user()["full_name"],"Public About Update","Institutional public About sections and media updated.")
+    flash("Public About saved. Refresh or open Preview to see the current public page.","success")
+    return redirect(url_for("admin_public_about"))
+
+@app.route("/admin/public-about", methods=["GET"])
+@login_required
+@role_required("Admin")
+def admin_public_about():
+    settings=school_settings()
+    return render_template("admin_public_about.html", settings=settings, actor_name=current_user()["full_name"], role=current_user()["role"], about_sections=public_about_sections(settings))
+
 
 @app.route("/admin/theme/preset", methods=["POST"])
 @login_required
@@ -6157,13 +6197,23 @@ def admin_institution_profile():
 @login_required
 @role_required("Admin")
 def admin_public_settings():
-    keys=["institution_history","institution_performance","institution_religion","institution_affiliations","institution_help","institution_contact","institution_owners","developer_name","developer_about","company_name","company_about"]
-    values={k:request.form.get(k,"").strip() for k in keys}
-    selected=[k for k in ["institution","history","achievements","owners","developer","company"] if request.form.get(f"show_{k}")]
-    execute("""UPDATE school_settings SET institution_history=?, institution_performance=?, institution_religion=?, institution_affiliations=?, institution_help=?, institution_contact=?, institution_owners=?, developer_name=?, developer_about=?, company_name=?, company_about=?, prelogin_sections=?, landing_hero_title=?, landing_hero_text=?, landing_cta_primary=?, landing_cta_secondary=?, landing_announcement=?, landing_contact=?, landing_show_dates=?, landing_show_gallery=?, landing_show_roles=? WHERE id=1""", (values["institution_history"],values["institution_performance"],values["institution_religion"],values["institution_affiliations"],values["institution_help"],values["institution_contact"],values["institution_owners"],values["developer_name"],values["developer_about"],values["company_name"],values["company_about"],",".join(selected), request.form.get("landing_hero_title","").strip()[:240], request.form.get("landing_hero_text","").strip()[:2000], request.form.get("landing_cta_primary","").strip()[:80] or "Sign in to your workspace", request.form.get("landing_cta_secondary","").strip()[:80] or "View school information", request.form.get("landing_announcement","").strip()[:500], request.form.get("landing_contact","").strip()[:500], 1 if request.form.get("landing_show_dates") else 0, 1 if request.form.get("landing_show_gallery") else 0, 1 if request.form.get("landing_show_roles") else 0))
-    audit(current_user()["id"], current_user()["full_name"], "Public Information", "Pre-login information sections updated.")
-    flash("Public information settings saved.", "success")
+    # About content is intentionally managed only from Admin → Public About.
+    execute("""UPDATE school_settings SET prelogin_sections=?, landing_hero_title=?, landing_hero_text=?, landing_cta_primary=?, landing_cta_secondary=?, landing_announcement=?, landing_contact=?, landing_show_dates=?, landing_show_gallery=?, landing_show_roles=? WHERE id=1""", (
+        request.form.get("prelogin_sections", "institution,history,achievements,owners,developer,company"),
+        request.form.get("landing_hero_title", "").strip()[:240],
+        request.form.get("landing_hero_text", "").strip()[:2000],
+        request.form.get("landing_cta_primary", "").strip()[:80] or "Sign in to your workspace",
+        request.form.get("landing_cta_secondary", "").strip()[:80] or "View school information",
+        request.form.get("landing_announcement", "").strip()[:500],
+        request.form.get("landing_contact", "").strip()[:500],
+        1 if request.form.get("landing_show_dates") else 0,
+        1 if request.form.get("landing_show_gallery") else 0,
+        1 if request.form.get("landing_show_roles") else 0,
+    ))
+    audit(current_user()["id"], current_user()["full_name"], "Public Settings", "Public landing settings updated; About content remains managed in Public About.")
+    flash("Public landing settings saved. Use Public About for institutional writing.", "success")
     return redirect(url_for("admin_dashboard"))
+
 
 @app.route("/admin/login-access", methods=["POST"])
 @login_required

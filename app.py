@@ -1987,6 +1987,10 @@ def resolve_staff_token(raw_token: str):
 def reception_admin_ids():
     return [r['id'] for r in q("SELECT id FROM users WHERE active=1 AND role IN ('Admin','ICT')")]
 
+def attendance_admin_ids():
+    """Attendance notifications are private to active Admin accounts."""
+    return [r['id'] for r in q("SELECT id FROM users WHERE active=1 AND role='Admin'")]
+
 def record_reception_scan(action, token='', device_token='', full_name='', phone='', gender='', reason='', source='online', method='QR', latitude=None, longitude=None, accuracy=None, event_at=None, school_unit='', school_location='', id_number=''):
     action=str(action or '').upper()
     if action not in {'IN','OUT'}: raise ValueError('Action must be IN or OUT')
@@ -3026,7 +3030,7 @@ def teacher_class_attendance():
 def finance_match_external(event_id:int):
     event=q("SELECT * FROM external_payment_events WHERE id=? AND status!='Matched'",(event_id,),one=True); sid=request.form.get('student_id',type=int); student=q('SELECT * FROM students WHERE id=? AND active=1',(sid,),one=True) if sid else None
     if not event or not student: flash('Payment event or student was not found.','danger'); return redirect(url_for('finance_dashboard'))
-    poster=current_user()['id']; pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(sid,event['amount'],event['provider'],event['external_reference'],poster)); recalculate_student_balance(sid); new_balance=float(q("SELECT balance FROM students WHERE id=?",(sid,),one=True)['balance'] or 0); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,event_id)); audit(current_user()['id'],current_user()['full_name'],'Match External Payment',f'External payment {event["external_reference"]} matched to {student["admission_no"]}.'); flash('External payment matched and posted.','success'); return redirect(url_for('finance_dashboard'))
+    poster=current_user()['id']; pid=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status) VALUES(?,?,?,?,?,'Posted')",(sid,event['amount'],event['provider'],event['external_reference'],poster)); recalculate_student_balance(sid); new_balance=float(q("SELECT balance FROM students WHERE id=?",(sid,),one=True)['balance'] or 0); notify_teachers_of_payment(q("SELECT * FROM students WHERE id=?",(sid,),one=True),event['amount'],new_balance); execute("UPDATE external_payment_events SET status='Matched',matched_student_id=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,event_id)); audit(current_user()['id'],current_user()['full_name'],'Match External Payment',f'External payment {event["external_reference"]} matched to {student["admission_no"]}.'); flash('External payment matched and posted.','success'); return redirect(url_for('finance_dashboard'))
 
 @app.route("/allocate", methods=["GET","POST"])
 @login_required
@@ -3573,7 +3577,7 @@ def record_account_attendance(user,action,event_at=None,source='online',method='
     location_label=_attendance_event_location(latitude,longitude,location_label)
     execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(user['id'],action,method,'',stamp,source,latitude,longitude,accuracy,None,device_note,location_label))
     position=user['title'] or user['role'] or 'Staff'
-    notify_users(reception_admin_ids(),f'Attendance: {user["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{user["full_name"]} ({position}) checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {location_label or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
+    notify_users(attendance_admin_ids(),f'Attendance: {user["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{user["full_name"]} ({position}) checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {location_label or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
     return {'ok':True,'message':f'{user["full_name"]} checked {"in" if action=="IN" else "out"}.','action':action,'event_at':stamp,'location_label':location_label,'dashboard':specialized_dashboard_for(user)}
 
 @app.route("/attendance")
@@ -3609,7 +3613,7 @@ def attendance_record():
     lat=request.form.get('latitude',type=float); lon=request.form.get('longitude',type=float); accuracy=request.form.get('accuracy',type=float)
     resolved_location=_attendance_event_location(lat,lon,request.form.get('location_label','').strip())
     execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(current_user()['id'],action,'QR',token,stamp,request.form.get('source','online'),lat,lon,accuracy,request.form.get('speed_kph',type=float),request.form.get('device_note',''),resolved_location))
-    notify_users(reception_admin_ids(),f'Attendance: {current_user()["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{current_user()["full_name"]} checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {resolved_location or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
+    notify_users(attendance_admin_ids(),f'Attendance: {current_user()["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{current_user()["full_name"]} checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {resolved_location or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
     return jsonify({'ok':True,'message':f'Checked {"in" if action=="IN" else "out"}.','event_at':stamp,'location_label':resolved_location})
 
 @app.route("/attendance/sync",methods=['POST'])
@@ -3692,6 +3696,33 @@ def admin_attendance_qr_image():
     img=qrcode.make(f"ATTEND:{office['token']}"); buf=io.BytesIO(); img.save(buf,format='PNG'); buf.seek(0)
     return send_file(buf,mimetype='image/png',download_name='institution-attendance-qr.png',as_attachment=False)
 
+@app.route('/admin/attendance/live')
+@login_required
+@role_required('Admin','ICT')
+def admin_attendance_live():
+    local_today=_local_now_naive().date().isoformat()
+    today_start,today_end=attendance_day_bounds_utc(local_today)
+    rows=q("""
+        SELECT u.id,u.full_name,u.role,COALESCE(NULLIF(u.title,''),u.role) AS title,
+               (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS sign_in_at,
+               (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS sign_out_at,
+               (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? AND a.location_label!='' ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS location,
+               (SELECT a.latitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS latitude,
+               (SELECT a.longitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS longitude,
+               (SELECT a.accuracy FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS accuracy
+        FROM users u
+        WHERE u.active=1 AND u.role NOT IN ('Student','Parent','System')
+        ORDER BY u.full_name
+    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
+    out=[]
+    for r in rows:
+        item=dict(r)
+        item['sign_in_local']=_local_iso(_parse_stored_event(item['sign_in_at'])) if item.get('sign_in_at') else None
+        item['sign_out_local']=_local_iso(_parse_stored_event(item['sign_out_at'])) if item.get('sign_out_at') else None
+        # Role is always read from the staff account itself; never infer it from the scanner/admin account.
+        out.append(item)
+    return jsonify({'ok':True,'date':local_today,'rows':out})
+
 @app.route('/admin/attendance/manual', methods=['POST'])
 @login_required
 @role_required('Admin','ICT')
@@ -3711,7 +3742,7 @@ def admin_manual_attendance():
         return redirect(url_for('admin_dashboard'))
     result=record_account_attendance(target,action,stamp,'manual','Manual',None,None,None,note,location_label)
     if result.get('ok'):
-        notify_users(reception_admin_ids(),f'Attendance: {target["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'Manual attendance recorded for {target["full_name"]}. Location: {location_label or "Not supplied"}.',url_for('admin_attendance'))
+        notify_users(attendance_admin_ids(),f'Attendance: {target["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'Manual attendance recorded for {target["full_name"]}. Location: {location_label or "Not supplied"}.',url_for('admin_attendance'))
         flash(f'{target["full_name"]} marked {"in" if action=="IN" else "out"}.','success')
     else:
         flash(result.get('message','Attendance could not be recorded.'),'danger')
@@ -4148,11 +4179,11 @@ def admin_dashboard():
     active_students = q("SELECT COUNT(*) AS c FROM students WHERE active = 1", one=True)["c"]
     paid_students = q("SELECT COUNT(*) AS c FROM students WHERE payment_status = 'Paid'", one=True)["c"]
     pending_students = q("SELECT COUNT(*) AS c FROM students WHERE payment_status = 'Pending'", one=True)["c"]
-    partial_students = q("SELECT COUNT(*) AS c FROM students WHERE active=1 AND balance > 0 AND payment_status='Pending' AND balance < COALESCE((SELECT school_fee FROM school_settings WHERE id=1),0)", one=True)["c"]
-    unpaid_students = q("SELECT COUNT(*) AS c FROM students WHERE active=1 AND balance > 0 AND (COALESCE((SELECT school_fee FROM school_settings WHERE id=1),0)=0 OR balance >= COALESCE((SELECT school_fee FROM school_settings WHERE id=1),0))", one=True)["c"]
-    payment_paid_rows=q("SELECT admission_no,full_name,grade,balance,payment_status FROM students WHERE active=1 AND balance=0 ORDER BY grade,full_name")
-    payment_partial_rows=q("SELECT admission_no,full_name,grade,balance,payment_status FROM students WHERE active=1 AND balance>0 AND COALESCE((SELECT school_fee FROM school_settings WHERE id=1),0)>0 AND balance < (SELECT school_fee FROM school_settings WHERE id=1) ORDER BY grade,full_name")
-    payment_unpaid_rows=q("SELECT admission_no,full_name,grade,balance,payment_status FROM students WHERE active=1 AND balance>0 AND (COALESCE((SELECT school_fee FROM school_settings WHERE id=1),0)=0 OR balance >= (SELECT school_fee FROM school_settings WHERE id=1)) ORDER BY grade,full_name")
+    partial_students = q("SELECT COUNT(*) AS c FROM students WHERE active=1 AND balance > 0 AND fee_assessed_total > 0 AND balance < fee_assessed_total", one=True)["c"]
+    unpaid_students = q("SELECT COUNT(*) AS c FROM students WHERE active=1 AND balance > 0 AND (fee_assessed_total <= 0 OR balance >= fee_assessed_total)", one=True)["c"]
+    payment_paid_rows=q("SELECT admission_no,full_name,grade,balance,payment_status,fee_assessed_total FROM students WHERE active=1 AND balance<=0 ORDER BY grade,full_name")
+    payment_partial_rows=q("SELECT admission_no,full_name,grade,balance,payment_status,fee_assessed_total FROM students WHERE active=1 AND balance>0 AND fee_assessed_total>0 AND balance < fee_assessed_total ORDER BY grade,full_name")
+    payment_unpaid_rows=q("SELECT admission_no,full_name,grade,balance,payment_status,fee_assessed_total FROM students WHERE active=1 AND balance>0 AND (fee_assessed_total<=0 OR balance>=fee_assessed_total) ORDER BY grade,full_name")
     grade_people=q("SELECT grade,COUNT(*) AS c,SUM(CASE WHEN balance=0 THEN 1 ELSE 0 END) AS paid,SUM(CASE WHEN balance>0 THEN 1 ELSE 0 END) AS owing FROM students WHERE active=1 GROUP BY grade ORDER BY grade")
     staff_breakdown=q("SELECT role,COUNT(*) AS c FROM users WHERE active=1 AND role!='System' GROUP BY role ORDER BY role")
     total_income = q("SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE status = 'Posted'", one=True)["total"]
@@ -4306,7 +4337,8 @@ def teacher_dashboard():
     students=[]
     if user["role"]=="Teacher" and classes:
         placeholders=','.join('?'*len(classes))
-        students=q(f"""SELECT DISTINCT s.id,s.full_name,s.admission_no,s.grade,
+        students=q(f"""SELECT DISTINCT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,
+            CASE WHEN s.balance<=0 THEN 'Paid' WHEN s.fee_assessed_total>0 AND s.balance<s.fee_assessed_total THEN 'Partial' ELSE 'Unpaid' END AS payment_bucket,
             (SELECT COUNT(*) FROM student_subjects ss WHERE ss.student_id=s.id AND ss.status='Approved') AS subject_count
             FROM students s
             LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
@@ -4314,7 +4346,7 @@ def teacher_dashboard():
             WHERE s.active=1 AND (s.grade IN ({placeholders}) OR sta.id IS NOT NULL OR cta.id IS NOT NULL)
             ORDER BY s.grade,s.full_name""",(user["id"],user["id"],*classes))
     elif user["role"] in {"Admin","ICT"}:
-        students=q("SELECT s.id,s.full_name,s.admission_no,s.grade,COUNT(ss.id) AS subject_count FROM students s LEFT JOIN student_subjects ss ON ss.student_id=s.id AND ss.status='Approved' WHERE s.active=1 GROUP BY s.id ORDER BY s.grade,s.full_name")
+        students=q("SELECT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,CASE WHEN s.balance<=0 THEN 'Paid' WHEN s.fee_assessed_total>0 AND s.balance<s.fee_assessed_total THEN 'Partial' ELSE 'Unpaid' END AS payment_bucket,COUNT(ss.id) AS subject_count FROM students s LEFT JOIN student_subjects ss ON ss.student_id=s.id AND ss.status='Approved' WHERE s.active=1 GROUP BY s.id ORDER BY s.grade,s.full_name")
     latest_marks=q("SELECT m.*,s.full_name FROM markbook_entries m JOIN students s ON s.id=m.student_id WHERE m.teacher_user_id=? ORDER BY m.created_at DESC LIMIT 80",(user['id'],))
     events=q("SELECT * FROM attendance_events WHERE user_id=? ORDER BY event_at DESC,id DESC LIMIT 20",(user["id"],)) if user["role"]=="Teacher" else []
     upcoming=q("SELECT * FROM class_sessions WHERE teacher_user_id=? AND active=1 AND (starts_at>=datetime('now') OR ends_at>=datetime('now')) ORDER BY starts_at LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
@@ -4369,6 +4401,31 @@ def teacher_scheme_of_work():
         rows=q("SELECT s.*,u.full_name AS teacher_name FROM scheme_of_work s JOIN users u ON u.id=s.teacher_user_id WHERE (?='' OR s.class_name=?) AND (?='' OR s.subject=?) ORDER BY s.term,s.class_name,s.subject,s.week_no,s.id", (selected_class,selected_class,selected_subject,selected_subject))
     return render_template("scheme_of_work.html", settings=settings, assignments=assignments, rows=rows, selected_class=selected_class, selected_subject=selected_subject, theme_style="", theme_preset_style="")
 
+
+@app.route("/api/teacher/fee-status")
+@login_required
+@role_required("Teacher", "Admin")
+def teacher_fee_status_api():
+    user=current_user()
+    if user["role"]=="Admin":
+        rows=q("SELECT id,balance,fee_assessed_total FROM students WHERE active=1")
+    else:
+        class_rows=q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=?",(user["id"],))
+        taught_rows=q("SELECT DISTINCT class_name FROM teacher_assignments WHERE teacher_user_id=? AND active=1",(user["id"],))
+        allocated_rows=q("SELECT DISTINCT student_id FROM student_teacher_assignments WHERE teacher_user_id=? AND active=1",(user["id"],))
+        classes={r["class_name"] for r in class_rows if r["class_name"]}|{r["class_name"] for r in taught_rows if r["class_name"]}
+        ids={int(r["student_id"]) for r in allocated_rows if r["student_id"]}
+        clauses=[]; params=[]
+        if classes:
+            ph=','.join('?'*len(classes)); clauses.append(f"grade IN ({ph})"); params.extend(sorted(classes))
+        if ids:
+            ph=','.join('?'*len(ids)); clauses.append(f"id IN ({ph})"); params.extend(sorted(ids))
+        rows=q(f"SELECT id,balance,fee_assessed_total FROM students WHERE active=1 AND ({' OR '.join(clauses) or '0'})",tuple(params))
+    items=[]
+    for r in rows:
+        balance=float(r["balance"] or 0); assessed=float(r["fee_assessed_total"] or 0)
+        items.append({"id":r["id"],"balance":balance,"bucket":"Paid" if balance<=0 else ("Partial" if assessed>0 and balance<assessed else "Unpaid")})
+    return jsonify({"ok":True,"items":items})
 
 @app.route("/student/dashboard")
 @login_required
@@ -5678,6 +5735,15 @@ def delete_student(student_id: int):
     return redirect(request.referrer or url_for("admin_dashboard"))
 
 
+def notify_teachers_of_payment(student, amount, balance):
+    teacher_ids={int(r["id"]) for r in q("SELECT DISTINCT teacher_user_id AS id FROM student_teacher_assignments WHERE student_id=? AND active=1",(student["id"],)) if r["id"]}
+    teacher_ids|={int(r["id"]) for r in q("SELECT DISTINCT teacher_user_id AS id FROM class_teacher_assignments WHERE class_name=?",(student["grade"],)) if r["id"]}
+    teacher_ids|={int(r["id"]) for r in q("SELECT DISTINCT teacher_user_id AS id FROM teacher_assignments WHERE class_name=? AND active=1",(student["grade"],)) if r["id"]}
+    if not teacher_ids: return
+    assessed=float(student["fee_assessed_total"] or 0)
+    status="Fully paid" if balance<=0 else ("Partially paid" if assessed>0 and balance<assessed else "Unpaid")
+    notify_users(sorted(teacher_ids),"Fee payment received",f"{student['full_name']} ({student['admission_no']}) paid KES {float(amount):,.2f}. Current status: {status}; balance KES {max(balance,0):,.2f}.",url_for("student_profile",student_id=student["id"]))
+
 @app.route("/payments/add", methods=["POST"])
 @login_required
 @role_required("Finance", "Admin")
@@ -5706,6 +5772,7 @@ def add_payment():
     )
     recalculate_student_balance(student["id"])
     new_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0)
+    notify_teachers_of_payment(q("SELECT * FROM students WHERE id=?",(student['id'],),one=True), amount_f, new_balance)
     audit(current_user()["id"], current_user()["full_name"], "Record Payment", f"{amount_f:.2f} recorded for {student['admission_no']} using {method}.")
     flash("Payment recorded.", "success")
     return redirect(request.referrer or url_for("dashboard", student_id=student["id"]))
@@ -5748,6 +5815,7 @@ def finance_record_payment():
         name=f"receipt-{student['id']}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}.{ext}"; file.save(receipt_dir/name); receipt_path="uploads/receipts/"+name
     payment_id=execute("INSERT INTO payments(student_id,amount,method,reference_no,recorded_by,status,receipt_path) VALUES(?,?,?,?,?,'Posted',?)",(student['id'],amount,method,reference,current_user()['id'],receipt_path))
     recalculate_student_balance(student['id']); new_balance=float(q("SELECT balance FROM students WHERE id=?",(student['id'],),one=True)['balance'] or 0)
+    notify_teachers_of_payment(q("SELECT * FROM students WHERE id=?",(student['id'],),one=True), amount, new_balance)
     audit(current_user()['id'],current_user()['full_name'],'Finance Payment',f"Payment #{payment_id}: {amount:.2f} for {student['admission_no']}; balance {new_balance:.2f}.")
     flash("Payment posted and the student/parent balance has been updated.","success"); return redirect(url_for("finance_dashboard"))
 

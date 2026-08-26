@@ -94,7 +94,7 @@
       </div>
       <div class="today-attendance-card">
         <div class="panel-head"><div><div class="eyebrow">Live register</div><h3>Today’s staff status</h3></div><span class="muted small">One row per employee</span></div>
-        <div class="table-wrap"><table class="clean-attendance"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Sign in</th><th>Sign out</th></tr></thead><tbody>{% for a in today_attendance %}<tr><td><strong>{{a.full_name}}</strong></td><td>{{a.role}}</td><td>{{a.location or '—'}}</td><td>{% if a.sign_in_local %}{{a.sign_in_local[11:16]}}{% else %}<span class="muted">Not signed in</span>{% endif %}</td><td>{% if a.sign_out_local %}{{a.sign_out_local[11:16]}}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No active employees found.</td></tr>{% endfor %}</tbody></table></div>
+        <div class="table-wrap"><table class="clean-attendance"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Sign in</th><th>Sign out</th></tr></thead><tbody id="liveStaffRegisterBody">{% for a in today_attendance %}<tr><td><strong>{{a.full_name}}</strong></td><td>{{a.role}}</td><td>{{a.location or '—'}}</td><td>{% if a.sign_in_local %}{{a.sign_in_local[11:16]}}{% else %}<span class="muted">Not signed in</span>{% endif %}</td><td>{% if a.sign_out_local %}{{a.sign_out_local[11:16]}}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">No active employees found.</td></tr>{% endfor %}</tbody></table></div>
       </div>
       <div class="stats-grid" id="admin-metrics" style="margin-top:16px">
         <button class="mini-card nav-action" type="button" data-target="people-summary-panel"><span>{{ school_settings.learner_label }}s</span><strong>{{ summary.total_students }}</strong><small class="muted">Open people summary</small></button>
@@ -105,13 +105,40 @@
         <button class="mini-card nav-action" type="button" data-target="finance-summary-panel"><span>Outstanding</span><strong>KES {{ "{:,.0f}".format(summary.total_balance or 0) }}</strong><small class="muted">Paid / partial / unpaid</small></button>
       </div>
     </section>
+<script>
+(function(){
+  const body=document.getElementById('liveStaffRegisterBody');
+  if(!body) return;
+  const esc=(v)=>String(v ?? '').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]));
+  const time=(v)=>{if(!v)return ''; const m=String(v).match(/T(\d{2}:\d{2})/); return m?m[1]:''};
+  const render=(rows)=>{
+    if(!Array.isArray(rows)||!rows.length){body.innerHTML='<tr><td colspan="5" class="muted">No active employees found.</td></tr>';return;}
+    body.innerHTML=rows.map(a=>{
+      const role=esc(a.role||'Staff');
+      const loc=esc(a.location||((a.latitude!=null&&a.longitude!=null)?(Number(a.latitude).toFixed(5)+', '+Number(a.longitude).toFixed(5)):'—'));
+      const sin=a.sign_in_local?'<span>'+esc(time(a.sign_in_local))+'</span>':'<span class="muted">Not signed in</span>';
+      const sout=a.sign_out_local?'<span>'+esc(time(a.sign_out_local))+'</span>':'<span class="muted">—</span>';
+      return '<tr><td><strong>'+esc(a.full_name||'Staff')+'</strong></td><td>'+role+'</td><td>'+loc+'</td><td>'+sin+'</td><td>'+sout+'</td></tr>';
+    }).join('');
+  };
+  let busy=false;
+  async function refresh(){
+    if(busy||document.hidden)return; busy=true;
+    try{const r=await fetch('/admin/attendance/live',{headers:{'Accept':'application/json'},cache:'no-store'}); const j=await r.json(); if(j.ok)render(j.rows);}
+    catch(e){} finally{busy=false;}
+  }
+  refresh();
+  window.setInterval(refresh,5000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+})();
+</script>
 
     <section id="finance-summary-panel" class="panel glass workspace-panel hidden">
       <div class="panel-head"><div><div class="eyebrow">Finance summary</div><h3>Money position at a glance</h3><p class="muted">Every summary tile opens a real list. Paid learners rise to the top; partial balances sit in the orange zone; unpaid balances sit below them.</p></div><a class="btn btn-ghost mini" href="/finance-dashboard">Open Finance workspace</a></div>
       <div class="stats-grid" style="margin-bottom:16px"><div class="mini-card"><span>Fully paid</span><strong>{{payment_paid_rows|length}}</strong></div><div class="mini-card"><span>Partially paid</span><strong>{{payment_partial_rows|length}}</strong></div><div class="mini-card"><span>Unpaid / full balance</span><strong>{{payment_unpaid_rows|length}}</strong></div><div class="mini-card"><span>Outstanding</span><strong>KES {{"{:,.0f}".format(summary.total_balance or 0)}}</strong></div></div>
-      <div class="payment-status-zone paid"><h4>Fully paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_paid_rows %}<tr><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Paid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No fully paid learners yet.</td></tr>{% endfor %}</tbody></table></div></div>
-      <div class="payment-status-zone partial"><h4>Partially paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_partial_rows %}<tr><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Partial</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No partial balances in the current fee setup.</td></tr>{% endfor %}</tbody></table></div></div>
-      <div class="payment-status-zone unpaid"><h4>Unpaid / full balance</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_unpaid_rows %}<tr><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Unpaid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No full outstanding balances.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div class="payment-status-zone paid"><h4>Fully paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_paid_rows %}<tr class="payment-line paid"><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Paid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No fully paid learners yet.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div class="payment-status-zone partial"><h4>Partially paid</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_partial_rows %}<tr class="payment-line partial"><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Partial</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No partial balances in the current fee setup.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div class="payment-status-zone unpaid"><h4>Unpaid / full balance</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Admission</th><th>Learner</th><th>Grade</th><th>Balance</th></tr></thead><tbody>{% for r in payment_unpaid_rows %}<tr class="payment-line unpaid"><td><span class="status-pill"><span class="payment-status-dot" aria-hidden="true"></span>Unpaid</span></td><td>{{r.admission_no}}</td><td>{{r.full_name}}</td><td>{{r.grade}}</td><td>KES {{"{:,.0f}".format(r.balance or 0)}}</td></tr>{% else %}<tr><td colspan="5" class="muted">No full outstanding balances.</td></tr>{% endfor %}</tbody></table></div></div>
     </section>
 
     <section id="people-summary-panel" class="panel glass workspace-panel hidden">

@@ -5346,7 +5346,31 @@ def add_student():
     fee_override_enabled=bool(fee_override)
 
     if not full_name or not grade:
-        flash("Student name and grade are required. All other fields may be left blank.", "danger")
+        missing=[]
+        if not full_name: missing.append("full name")
+        if not grade: missing.append("grade / class")
+        flash("Please add " + " and ".join(missing) + ". Everything else can be left blank.", "danger")
+        return redirect(url_for("admin_dashboard") + "#admin-add-student")
+
+    if fee_override:
+        try:
+            manual_fee=float(fee_override)
+            if manual_fee < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            flash("The exact fee total must be a valid amount of 0 or more. Example: 18500 or 18500.00. The student was not submitted.", "danger")
+            return redirect(url_for("admin_dashboard") + "#admin-add-student")
+
+    if uses_bus and not transport_zone:
+        flash("School bus is set to Yes, but no transport zone was selected. Choose a transport zone or change School bus to No. The student was not submitted.", "danger")
+        return redirect(url_for("admin_dashboard") + "#admin-add-student")
+
+    try:
+        meal_charge_value=float(request.form.get('meal_charge','0') or 0)
+        if meal_charge_value < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        flash("Meal charge must be a valid amount of 0 or more, or leave it at 0 when meals are not being charged. The student was not submitted.", "danger")
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     settings = school_settings()
@@ -5362,17 +5386,14 @@ def add_student():
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     fee = float(settings["school_fee"] or 0)
-    try:
-        manual_fee=float(fee_override) if fee_override else None
-    except ValueError:
-        manual_fee=None; fee_override_enabled=False
+    manual_fee=float(fee_override) if fee_override else None
     if manual_fee is not None:
         fee=manual_fee
     transport_charge=0.0
     if uses_bus and transport_zone:
         tr=q('SELECT amount FROM transport_rates WHERE zone_name=? AND active=1 LIMIT 1',(transport_zone,),one=True)
         transport_charge=float(tr['amount'] or 0) if tr else 0.0
-    meal_charge=float(request.form.get('meal_charge','0') or 0) if meal_plan!='None' else 0.0
+    meal_charge=meal_charge_value if meal_plan!='None' else 0.0
     if fee_override_enabled:
         assessed=fee
     else:
@@ -5385,7 +5406,7 @@ def add_student():
             admission_no,full_name,grade,age,guardian_name,guardian_phone,guardian_email,
             alt_guardian_name,alt_guardian_phone,alt_guardian_email,student_phone,student_email,address,date_of_birth,gender,id_reference,emergency_contact,blood_group,medical_notes,
             medical_condition,allergies,special_info,notes,payment_status,balance,fee_assessed_total,fee_override_enabled,transport_zone,uses_school_bus,meal_plan,transport_charge,active)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (admission_no,full_name,grade,age,fields["guardian_name"],fields["guardian_phone"],fields["guardian_email"],
              fields["alt_guardian_name"],fields["alt_guardian_phone"],fields["alt_guardian_email"],generated_email,generated_email,fields['address'],fields['date_of_birth'],fields['gender'],fields['id_reference'],fields['emergency_contact'],fields['blood_group'],fields['medical_notes'],
              fields["medical_condition"],fields["allergies"],fields["special_info"],fields["notes"],"Pending",assessed,assessed,1 if fee_override_enabled else 0,transport_zone,uses_bus,meal_plan,transport_charge))

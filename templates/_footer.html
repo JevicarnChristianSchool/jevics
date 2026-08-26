@@ -1,7 +1,51 @@
 {% if school_settings.theme_preset|default("classic", true) != "classic" %}<div class="seasonal-layer seasonal-{{ school_settings.theme_preset|default('classic', true) }}" data-season-role="{{ role|default('', true) }}" aria-hidden="true"><div class="seasonal-spark seasonal-spark-a"></div><div class="seasonal-spark seasonal-spark-b"></div><div class="seasonal-motif">{% if school_settings.theme_preset=='christmas' %}<span class="seasonal-glyph snowflake" aria-hidden="true"></span><span class="seasonal-glyph bell" aria-hidden="true"></span><span class="seasonal-glyph snowflake" aria-hidden="true"></span>{% elif school_settings.theme_preset=='easter' %}<span>◌</span><span>✿</span><span>◌</span>{% elif school_settings.theme_preset=='madaraka' %}<span>✦</span><span>✦</span><span>✦</span>{% else %}<span>✦</span><span>•</span><span>✦</span>{% endif %}</div><button type="button" class="seasonal-dismiss" id="dismissSeasonalTheme">Dismiss</button></div>{% endif %}
 
 {% if request.path == "/" %}
-<footer class="institution-footer"><div class="footer-main"><div><div class="footer-kicker">{{footer_settings.title}}</div><h3>One institution. One connected platform.</h3><p>{{footer_settings.text}}</p>{% if footer_settings.contact %}<p class="footer-contact">{{footer_settings.contact}}</p>{% endif %}</div><div><div class="footer-kicker">Portal</div><a href="/">Home</a><a href="/system-help">System Help</a><a href="/ai-assistant">AI Assistant</a><a href="/institution">Institution profile</a></div><div><div class="footer-kicker">Access</div><a href="/teacher">Teacher</a>{% if parent_portal_enabled %}<a href="/parent">Parent</a>{% endif %}<a href="/student">Student</a><a href="/driver">Driver / Transport</a></div></div><div class="footer-bottom"><span>© {{current_year}} {{footer_settings.title}}. All rights reserved.</span>{% if footer_settings.platform_credit %}<span>Platform technology by Toror Technology and Innovations Ltd.</span>{% endif %}</div></footer>{% else %}<footer class="app-footer-minimal"><div class="footer-bottom"><span>© {{current_year}} {{footer_settings.title}}. All rights reserved.</span></div></footer>{% endif %}<script>(function(){var el=document.querySelector('.seasonal-layer');var b=document.getElementById('dismissSeasonalTheme');if(!el||!b)return;var key='seasonal-dismissed-'+(el.dataset.seasonRole||'all')+'-'+(el.className.match(/seasonal-([a-z-]+)/)||['','classic'])[1];if(localStorage.getItem(key)==='1')el.remove();b.addEventListener('click',function(){el.remove();try{localStorage.setItem(key,'1')}catch(e){}});})();</script>
+<footer class="institution-footer">
+  <div class="footer-main">
+    <div class="footer-brand-block">
+      <div class="footer-kicker">{{footer_settings.title}}</div>
+      <h3>{{ school_settings.school_name }}</h3>
+      <p>{{footer_settings.text}}</p>
+      {% if footer_settings.contact %}<p class="footer-contact">{{footer_settings.contact}}</p>{% endif %}
+    </div>
+    <div>
+      <div class="footer-kicker">Explore</div>
+      <a href="#home">Home</a>
+      <a href="#about">About the institution</a>
+      <a href="#dates">Calendar</a>
+      {% if school_settings.public_map_query %}<a href="#visit">Visit us</a>{% endif %}
+      <a href="#contact">Contacts</a>
+    </div>
+    <div>
+      <div class="footer-kicker">Support</div>
+      <a href="/system-help">System Help</a>
+      <a href="/ai-assistant">AI Assistant</a>
+      <a href="#home">Back to top ↑</a>
+    </div>
+    <div class="footer-social-block">
+      <div class="footer-kicker">Social media</div>
+      {% set social_items = (footer_settings.links or '').split(',') %}
+      {% set ns = namespace(found=false) %}
+      {% for item in social_items %}
+        {% set bits = item.split('|', 1) %}
+        {% if bits|length == 2 and bits[1].strip() %}
+          {% set ns.found = true %}<a href="{{bits[1].strip()}}" target="_blank" rel="noopener">{{bits[0].strip()}}</a>
+        {% endif %}
+      {% endfor %}
+      {% if not ns.found %}<span class="footer-social-note">Social links will appear here when the institution adds them.</span>{% endif %}
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© {{current_year}} {{footer_settings.title}}. All rights reserved.</span>
+    {% if footer_settings.platform_credit %}<span>Platform technology by Toror Technology and Innovations Ltd.</span>{% endif %}
+    <a class="footer-top-link" href="#home">↑ Back to top</a>
+  </div>
+</footer>
+{% else %}
+<footer class="app-footer-minimal"><div class="footer-bottom"><span>© {{current_year}} {{footer_settings.title}}. All rights reserved.</span></div></footer>
+{% endif %}
+<script>(function(){var el=document.querySelector('.seasonal-layer');var b=document.getElementById('dismissSeasonalTheme');if(!el||!b)return;var key='seasonal-dismissed-'+(el.dataset.seasonRole||'all')+'-'+(el.className.match(/seasonal-([a-z-]+)/)||['','classic'])[1];if(localStorage.getItem(key)==='1')el.remove();b.addEventListener('click',function(){el.remove();try{localStorage.setItem(key,'1')}catch(e){}});})();</script>
 <script>
 (function(){
   if(!window.fetch || !navigator.geolocation) return;

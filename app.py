@@ -1583,6 +1583,18 @@ def q(sql: str, params: Iterable[Any] = (), one: bool = False):
     return rows
 
 
+def safe_q(sql: str, params: Iterable[Any] = (), one: bool = False, default=None):
+    """Best-effort read used by portal rendering. Failures are logged and never take down a workspace."""
+    try:
+        value = q(sql, params, one=one)
+        if one:
+            return value if value is not None else default
+        return value or (default if default is not None else [])
+    except Exception as exc:
+        app.logger.exception("Non-fatal portal read failure: %s", exc)
+        return default if default is not None else (None if one else [])
+
+
 def execute(sql: str, params: Iterable[Any] = ()) -> int:
     db = get_db()
     cur = db.execute(sql, tuple(params))
@@ -4374,25 +4386,33 @@ def admin_dashboard():
     )
 
 
+def safe_markbook_class_summary(class_name, subject=None):
+    try:
+        return markbook_class_summary(class_name, subject)
+    except Exception as exc:
+        app.logger.exception("Non-fatal teacher markbook read failure: %s", exc)
+        return []
+
+
 @app.route("/teacher/dashboard")
 @login_required
 def teacher_dashboard():
     if current_user()["role"] not in {"Teacher", "Admin"}:
         return redirect(specialized_dashboard_for(current_user()))
     settings=school_settings(); user=current_user()
-    assignments=q("SELECT * FROM teacher_assignments WHERE teacher_user_id=? AND active=1 ORDER BY class_name,subject",(user["id"],)) if user["role"]=="Teacher" else q("SELECT a.*,u.full_name AS teacher_name FROM teacher_assignments a JOIN users u ON u.id=a.teacher_user_id WHERE a.active=1 ORDER BY a.class_name,a.subject")
+    assignments=safe_q("SELECT * FROM teacher_assignments WHERE teacher_user_id=? AND active=1 ORDER BY class_name,subject",(user["id"],)) if user["role"]=="Teacher" else safe_q("SELECT a.*,u.full_name AS teacher_name FROM teacher_assignments a JOIN users u ON u.id=a.teacher_user_id WHERE a.active=1 ORDER BY a.class_name,a.subject")
     # A teacher can receive learners directly from Admin even when the
     # teacher has not created a separate teaching assignment. Include those
     # allocated class names in the workspace so the learners actually appear.
-    allocated_class_rows=q("SELECT DISTINCT COALESCE(NULLIF(class_name,''), (SELECT grade FROM students WHERE id=student_id)) AS class_name FROM student_teacher_assignments WHERE teacher_user_id=? AND active=1 ORDER BY class_name",(user["id"],)) if user["role"]=="Teacher" else []
+    allocated_class_rows=safe_q("SELECT DISTINCT COALESCE(NULLIF(class_name,''), (SELECT grade FROM students WHERE id=student_id)) AS class_name FROM student_teacher_assignments WHERE teacher_user_id=? AND active=1 ORDER BY class_name",(user["id"],)) if user["role"]=="Teacher" else []
     allocated_classes={r["class_name"] for r in allocated_class_rows if r["class_name"]}
-    classes=sorted({r["class_name"] for r in assignments} | {r["class_name"] for r in q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=?",(user["id"],))} | allocated_classes)
-    assigned_class_rows=q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=? ORDER BY class_name",(user['id'],)) if user['role']=='Teacher' else q("SELECT class_name FROM class_teacher_assignments ORDER BY class_name")
+    classes=sorted({r["class_name"] for r in assignments} | {r["class_name"] for r in safe_q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=?",(user["id"],))} | allocated_classes)
+    assigned_class_rows=safe_q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=? ORDER BY class_name",(user['id'],)) if user['role']=='Teacher' else safe_q("SELECT class_name FROM class_teacher_assignments ORDER BY class_name")
     class_teacher_classes=[r['class_name'] for r in assigned_class_rows]
     students=[]
     if user["role"]=="Teacher" and classes:
         placeholders=','.join('?'*len(classes))
-        students=q(f"""SELECT DISTINCT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,
+        students=safe_q(f"""SELECT DISTINCT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,
             CASE WHEN s.balance<=0 THEN 'Paid' WHEN s.fee_assessed_total>0 AND s.balance<s.fee_assessed_total THEN 'Partial' ELSE 'Unpaid' END AS payment_bucket,
             (SELECT COUNT(*) FROM student_subjects ss WHERE ss.student_id=s.id AND ss.status='Approved') AS subject_count
             FROM students s
@@ -4402,17 +4422,17 @@ def teacher_dashboard():
             ORDER BY s.grade,s.full_name""",(user["id"],user["id"],*classes))
     elif user["role"] in {"Admin","ICT"}:
         students=q("SELECT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,CASE WHEN s.balance<=0 THEN 'Paid' WHEN s.fee_assessed_total>0 AND s.balance<s.fee_assessed_total THEN 'Partial' ELSE 'Unpaid' END AS payment_bucket,COUNT(ss.id) AS subject_count FROM students s LEFT JOIN student_subjects ss ON ss.student_id=s.id AND ss.status='Approved' WHERE s.active=1 GROUP BY s.id ORDER BY s.grade,s.full_name")
-    latest_marks=q("SELECT m.*,s.full_name FROM markbook_entries m JOIN students s ON s.id=m.student_id WHERE m.teacher_user_id=? ORDER BY m.created_at DESC LIMIT 80",(user['id'],))
-    events=q("SELECT * FROM attendance_events WHERE user_id=? ORDER BY event_at DESC,id DESC LIMIT 20",(user["id"],)) if user["role"]=="Teacher" else []
-    upcoming=q("SELECT * FROM class_sessions WHERE teacher_user_id=? AND active=1 AND (starts_at>=datetime('now') OR ends_at>=datetime('now')) ORDER BY starts_at LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
-    schemes=q("SELECT * FROM scheme_of_work WHERE teacher_user_id=? ORDER BY updated_at DESC,id DESC LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
+    latest_marks=safe_q("SELECT m.*,s.full_name FROM markbook_entries m JOIN students s ON s.id=m.student_id WHERE m.teacher_user_id=? ORDER BY m.created_at DESC LIMIT 80",(user['id'],))
+    events=safe_q("SELECT * FROM attendance_events WHERE user_id=? ORDER BY event_at DESC,id DESC LIMIT 20",(user["id"],)) if user["role"]=="Teacher" else []
+    upcoming=safe_q("SELECT * FROM class_sessions WHERE teacher_user_id=? AND active=1 AND (starts_at>=datetime('now') OR ends_at>=datetime('now')) ORDER BY starts_at LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
+    schemes=safe_q("SELECT * FROM scheme_of_work WHERE teacher_user_id=? ORDER BY updated_at DESC,id DESC LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
     summaries={}
     for cls in classes[:12]:
         if cls in class_teacher_classes:
-            summaries[cls]=markbook_class_summary(cls)
+            summaries[cls]=safe_markbook_class_summary(cls)
         else:
-            teacher_subject=q("SELECT subject FROM teacher_assignments WHERE teacher_user_id=? AND class_name=? AND active=1 ORDER BY subject LIMIT 1",(user['id'],cls),one=True) if user['role']=='Teacher' else None
-            summaries[cls]=markbook_class_summary(cls,teacher_subject['subject']) if teacher_subject else []
+            teacher_subject=safe_q("SELECT subject FROM teacher_assignments WHERE teacher_user_id=? AND class_name=? AND active=1 ORDER BY subject LIMIT 1",(user['id'],cls),one=True) if user['role']=='Teacher' else None
+            summaries[cls]=safe_markbook_class_summary(cls,teacher_subject['subject']) if teacher_subject else []
     return render_template("teacher_dashboard_pro.html",settings=settings,school_settings=settings,actor_name=user["full_name"],role=user["role"],assignments=assignments,classes=classes,students=students,latest_marks=latest_marks,events=events,workspace_type=workspace_type_for_user(user),upcoming=upcoming,schemes=schemes,class_teacher_classes=class_teacher_classes,mark_summaries=summaries,nav_items=navigation_items("Teacher",settings))
 
 @app.route("/teacher/scheme-of-work", methods=["GET", "POST"])
@@ -4571,8 +4591,8 @@ def library():
     if subject: where.append("(subject=? OR subject='')"); params.append(subject)
     items=q(f"SELECT * FROM library_items WHERE {' AND '.join(where)} ORDER BY class_level,subject,category,title",params)
     loans=q("""SELECT l.*, i.title, s.full_name AS student_name, s.admission_no FROM library_loans l JOIN library_items i ON i.id=l.item_id JOIN students s ON s.id=l.student_id WHERE l.status='Issued' ORDER BY l.due_date, l.issued_at""")
-    classes=[r["grade"] for r in q("SELECT DISTINCT grade FROM students WHERE active=1 ORDER BY grade")]
-    subjects=[r["subject"] for r in q("SELECT DISTINCT subject FROM library_items WHERE active=1 AND subject!='' ORDER BY subject")]
+    classes=[r["grade"] for r in safe_q("SELECT DISTINCT grade FROM students WHERE active=1 ORDER BY grade")]
+    subjects=[r["subject"] for r in safe_q("SELECT DISTINCT subject FROM library_items WHERE active=1 AND subject!='' ORDER BY subject")]
     return render_template("library.html", items=items, loans=loans, settings=school_settings(), actor_name=current_user()["full_name"], selected_class=class_level, selected_subject=subject, library_classes=classes, library_subjects=subjects)
 
 @app.route("/librarian-dashboard")
@@ -5569,12 +5589,14 @@ def add_student():
             warnings.append("fee breakdown could not be posted automatically")
             app.logger.exception("Student %s saved but fee charge setup failed: %s", student_id, exc)
 
+    temp_student_password = secrets.token_urlsafe(9)
     try:
-        username = admission_no.lower()
+        username = generated_email.lower()
         execute("INSERT OR IGNORE INTO users(full_name,username,password_hash,role,student_id,active,workspace_type,title,email) VALUES(?,?,?,?,?,1,?,?,?)",
-                (full_name,username,generate_password_hash(admission_no),"Student",student_id,"Student","Student",generated_email))
+                (full_name,username,generate_password_hash(temp_student_password),"Student",student_id,"Student","Student",generated_email))
     except Exception as exc:
         warnings.append("student portal account setup skipped")
+        temp_student_password = ""
         app.logger.warning("Student %s saved but portal account setup was skipped: %s", student_id, exc)
 
     try:
@@ -5591,9 +5613,12 @@ def add_student():
         app.logger.warning("Student %s saved but audit logging failed: %s", student_id, exc)
 
     if warnings:
-        flash("Student added successfully. The learner record is saved; " + "; ".join(warnings) + ".", "warning")
+        message = "Student added successfully. The learner record is saved; " + "; ".join(warnings) + "."
+        if temp_student_password:
+            message += f" Portal username: {generated_email}. Temporary password: {temp_student_password}. Give it to the learner securely and ask them to change it after first sign-in."
+        flash(message, "warning")
     else:
-        flash("Student added successfully. The learner record is ready.", "success")
+        flash(f"Student added successfully. Portal username: {generated_email}. Temporary password: {temp_student_password}. Give it to the learner securely and ask them to change it after first sign-in.", "success")
     return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
 @app.route("/students/<int:student_id>/subjects", methods=["GET","POST"])
@@ -6900,28 +6925,53 @@ def api_student(student_id: int):
 
 @app.errorhandler(403)
 def forbidden(_):
-    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Access denied</title></head><body><h1>Access denied</h1><p>You do not have permission to access this area.</p><p><a href='/'>Return to portal</a></p></body></html>"), 403
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'>"
+            "<main class='auth-shell'><section class='auth-card glass'><div class='eyebrow'>Access</div><h1>That area is restricted</h1>"
+            "<p class='muted'>Your account remains active. Return to your workspace and continue from there.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/dashboard'>My workspace</a><a class='btn btn-ghost' href='/'>Home</a></div>"
+            "</section></main></body></html>"), 403
 
 
 @app.errorhandler(500)
 def internal_error(error):
     app.logger.exception("Unhandled Prime application error: %s", error)
-    # Keep the last-resort 500 response dependency-free. It must never render a
-    # template that itself depends on static routes or another failing service.
-    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal Error</title>"
-            "<style>body{font-family:system-ui,sans-serif;margin:0;padding:40px;background:#f4f7fb;color:#152033}main{max-width:720px;margin:auto;background:white;border-radius:18px;padding:28px;box-shadow:0 10px 30px rgba(0,0,0,.08)}"
-            "a{display:inline-block;margin-top:16px;padding:11px 15px;border-radius:10px;background:#2457d6;color:#fff;text-decoration:none}</style></head>"
-            "<body><main><h1>Something went wrong</h1><p>The portal could not complete that request. Your learner data is protected from partial writes.</p><a href='/'>Return to portal</a></main></body></html>"), 500
+    role=(session.get("active_portal_role") or "").strip()
+    target={"Admin":"/admin/dashboard","ICT":"/ict-dashboard","Finance":"/finance-dashboard",
+            "Teacher":"/teacher/dashboard","Student":"/student/dashboard","Parent":"/parent-dashboard",
+            "Librarian":"/librarian-dashboard","Driver":"/driver-dashboard"}.get(role,"/dashboard")
+    if request.path != target:
+        return redirect(target)
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
+            "<div class='eyebrow'>Prime workspace</div><h1>Your workspace is still available</h1>"
+            "<p class='muted'>A secondary operation failed, but the application is still running. The event has been recorded for diagnostics.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/'>Home</a><a class='btn btn-ghost' href='/logout'>Logout</a></div>"
+            "</section></main></body></html>"), 500
+
+
+@app.errorhandler(Exception)
+def unexpected_error(error):
+    app.logger.exception("Unhandled Prime exception: %s", error)
+    return internal_error(error)
 
 
 @app.errorhandler(404)
 def not_found(_):
-    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Not found</title></head><body><h1>Page not found</h1><p>The page you requested could not be found.</p><p><a href='/'>Return to portal</a></p></body></html>"), 404
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
+            "<div class='eyebrow'>Prime Portal</div><h1>Page not found</h1><p class='muted'>That destination is unavailable, but the school portal is still online.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/dashboard'>My workspace</a><a class='btn btn-ghost' href='/'>Home</a></div>"
+            "</section></main></body></html>"), 404
 
 
 @app.errorhandler(413)
 def too_large(_):
-    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>File too large</title></head><body><h1>File too large</h1><p>The uploaded file is too large.</p><p><a href='/'>Return to portal</a></p></body></html>"), 413
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
+            "<div class='eyebrow'>Upload</div><h1>File too large</h1><p class='muted'>The upload was not accepted. Your session is safe.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/dashboard'>My workspace</a><a class='btn btn-ghost' href='/'>Home</a></div>"
+            "</section></main></body></html>"), 413
 
 
 with app.app_context():

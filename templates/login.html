@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico">
 <title>{{ portal_title }} | Login</title><link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}"><meta name="theme-color" content="{{ theme_color }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"><style>{{theme_style|safe}}{{theme_preset_style|safe}}{{landing_style|safe}}</style><style>.landing-body{min-height:100vh}.landing-important-dates{margin:18px 0}.date-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.date-card{padding:15px;border:1px solid rgba(127,127,127,.18);border-radius:15px;background:var(--landing-panel,#fff);color:var(--landing-text,#152033)}.date-card strong,.date-card span{display:block}.date-day{font-weight:800;color:var(--primary-blue);margin-bottom:5px}.landing-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.landing-gallery figure{margin:0;overflow:hidden;border-radius:16px;background:var(--landing-panel,#fff)}.landing-gallery img{width:100%;height:190px;display:block;object-fit:cover}.landing-gallery figcaption{padding:8px 10px;font-size:12px;font-weight:700}.landing-card{background:var(--landing-panel,#fff);color:var(--landing-text,#152033)}@media(max-width:800px){.landing-gallery{grid-template-columns:1fr}.landing-gallery img{height:210px}}.qr-login-grid{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(280px,1.1fr);gap:18px}.qr-camera-card{display:grid;gap:10px}.qr-camera-card video{width:100%;min-height:260px;max-height:360px;object-fit:cover;border-radius:16px;background:#05080b;border:1px solid rgba(127,127,127,.2)}@media(max-width:760px){.qr-login-grid{grid-template-columns:1fr}}
-</style><style>.visitor-map{display:grid;grid-template-columns:1fr 1.15fr;gap:16px;margin:16px 0}.visitor-copy,.visitor-map iframe{border-radius:18px}.visitor-copy{padding:20px;border:1px solid color-mix(in srgb,var(--primary-blue) 18%,transparent);background:color-mix(in srgb,var(--landing-panel) 82%,transparent)}.visitor-map iframe{width:100%;min-height:260px;border:0}.portal-entry-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}.portal-entry-card{display:grid;gap:9px;padding:22px;border-radius:20px;border:1px solid color-mix(in srgb,var(--primary-blue) 20%,transparent);background:var(--landing-panel);text-decoration:none;color:inherit}.portal-entry-card strong{font-size:24px}.portal-family{min-height:150px}.staff-entry{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.staff-entry a{padding:15px;border-radius:16px;border:1px solid color-mix(in srgb,var(--primary-blue) 18%,transparent);text-decoration:none;color:inherit;background:color-mix(in srgb,var(--landing-panel) 90%,transparent)}.staff-entry span,.portal-entry-card span{display:block}.landing-card{backdrop-filter:blur(8px)}@media(max-width:820px){.visitor-map,.portal-entry-grid{grid-template-columns:1fr}.staff-entry{grid-template-columns:1fr}}</style></head>
+</style><style>.visitor-map{display:grid;grid-template-columns:1fr 1.15fr;gap:16px;margin:16px 0}.visitor-copy,.visitor-map iframe{border-radius:18px}.visitor-copy{padding:20px;border:1px solid color-mix(in srgb,var(--primary-blue) 18%,transparent);background:color-mix(in srgb,var(--landing-panel) 82%,transparent)}.visitor-map iframe{width:100%;min-height:260px;border:0}.portal-entry-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}.portal-entry-card{display:grid;gap:9px;padding:22px;border-radius:20px;border:1px solid color-mix(in srgb,var(--primary-blue) 20%,transparent);background:var(--landing-panel);text-decoration:none;color:inherit}.portal-entry-card strong{font-size:24px}.portal-family{min-height:150px}</style></head>
 <style>
 .welcome-splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:#071019;color:#fff;overflow:hidden;animation:wsFadeOut .58s cubic-bezier(.65,0,.35,1) forwards;animation-delay:calc(var(--ws-duration) - 580ms)}
 .welcome-splash[hidden]{display:none}
@@ -25,65 +25,147 @@
 <body class="auth-body landing-body landing-font-scope" style="--primary-blue: {{ school_settings.landing_accent_color }};--deep-accent-blue:{{ school_settings.accent_color }};--landing-bg:{{ school_settings.landing_background_color }};--landing-panel:{{ school_settings.landing_panel_color }};--landing-text:{{ school_settings.landing_text_color }};{% if school_settings.landing_background_path %}background-image:linear-gradient(180deg,color-mix(in srgb,var(--landing-bg) 84%,transparent),color-mix(in srgb,var(--landing-bg) 94%,transparent)),url('/{{ school_settings.landing_background_path }}');background-size:cover;background-position:center;background-attachment:fixed;{% endif %}background-color:var(--landing-bg);color:var(--landing-text)">
 {% if welcome_animation %}<div class="welcome-splash welcome-style-{{ school_settings.welcome_animation_style|default('clean', true) }}" id="welcomeSplash" style="--ws-accent:{{ school_settings.landing_accent_color }};--ws-duration:{{ welcome_animation_duration_ms }}ms"><div class="welcome-grid" aria-hidden="true"></div><div class="welcome-rail" aria-hidden="true"></div><div class="welcome-mark">{% if school_settings.logo_path %}<img class="welcome-logo" src="/{{ school_settings.logo_path }}" alt="">{% endif %}<div class="welcome-kicker">Institutional technology</div><div class="welcome-rule"></div><h1 class="welcome-name">{{ welcome_animation_name }}</h1><div class="welcome-sub">Technology · Innovation · Impact</div><div class="welcome-progress" aria-hidden="true"><span></span></div></div><div class="welcome-corner" aria-hidden="true"><span></span><b>01</b></div></div>{% endif %}
 <main class="auth-shell landing-shell"><section class="auth-card glass portal-selector landing-card">
-<div class="landing-topbar">
-  <div class="brand-line">{% if school_settings.logo_path %}<img class="landing-logo" src="/{{ school_settings.logo_path }}" alt="School logo">{% else %}<span class="brand-dot"></span>{% endif %}<div><div class="brand-name">{{ portal_title }}</div><div class="brand-subtitle">{{ school_settings.portal_subtitle }}</div></div></div>
-  <div class="landing-badge"><span class="landing-badge-dot"></span> Official school portal</div>
-</div>
+<header class="landing-topbar" id="landingTop">
+  <div class="landing-toprow">
+    <a class="landing-brand" href="#home" aria-label="{{ portal_title }} home">
+      {% if school_settings.logo_path %}<img class="landing-logo" src="/{{ school_settings.logo_path }}" alt="{{ portal_title }} logo">{% else %}<span class="brand-dot" aria-hidden="true"></span>{% endif %}
+    </a>
+    <button type="button" class="landing-menu-toggle" id="landingMenuToggle" aria-expanded="false" aria-controls="landingNav">Menu <span aria-hidden="true">☰</span></button>
+  </div>
+  <nav class="landing-nav" id="landingNav" aria-label="Public portal navigation">
+    <a class="landing-home-link" href="#home">Home</a>
+    <div class="landing-nav-menu">
+      <button type="button" class="landing-nav-trigger" aria-expanded="false">About <span aria-hidden="true">⌄</span></button>
+      <div class="landing-dropdown landing-dropdown-wide">
+        <div class="landing-drop-title">Institution</div>
+        <a href="#about">Welcome</a>
+        {% if school_settings.institution_history %}<a href="#history">Founders &amp; history</a>{% endif %}
+        {% if school_settings.institution_owners %}<a href="#owners">Founders &amp; management</a>{% endif %}
+        {% if school_settings.institution_religion %}<a href="#values">Religion &amp; values</a>{% endif %}
+        {% if school_settings.institution_performance %}<a href="#performance">Curriculum &amp; performance</a>{% endif %}
+        {% if school_settings.institution_help %}<a href="#guidelines">Dress code &amp; community guidelines</a>{% endif %}
+        {% if school_settings.institution_contact %}<a href="#contact">Vision &amp; contact</a>{% endif %}
+        {% if school_settings.developer_name %}<a href="#developer">Developer information</a>{% endif %}
+      </div>
+    </div>
+    <a href="#dates">Calendar</a>
+    <div class="landing-nav-menu">
+      <button type="button" class="landing-nav-trigger" aria-expanded="false">Portals <span aria-hidden="true">⌄</span></button>
+      <div class="landing-dropdown landing-dropdown-portal">
+        <div class="landing-drop-title">School services</div>
+        <a href="/online-classes">E-Learning / Online Classes</a>
+        <a href="/communication">School Communication</a>
+        <a href="/library">Library Resources</a>
+        {% if school_settings.public_map_query %}<a href="#visit">Visitor location</a>{% endif %}
+      </div>
+    </div>
+    {% if school_settings.public_map_query %}<a href="#visit">Visit</a>{% endif %}
+    <a href="#contact">Contacts</a>
+    <div class="landing-nav-menu landing-portal-login-menu">
+      <button type="button" class="landing-nav-trigger landing-nav-login" aria-expanded="false">Portal Login <span aria-hidden="true">⌄</span></button>
+      <div class="landing-dropdown landing-dropdown-portal-login">
+        <div class="landing-drop-title">Choose your portal</div>
+        <a href="/teacher">Teacher Portal</a>
+        {% if parent_portal_enabled %}<a href="/parent">Parent / Guardian Portal</a>{% endif %}
+        <a href="/student">Student Portal</a>
+        <a href="/librarian">Librarian Portal</a>
+        <a href="/driver">Driver Portal</a>
+      </div>
+    </div>
+  </nav>
+</header>
+
 {% if not login_role %}
 {% set pre = (school_settings.prelogin_sections or '').split(',') %}
-<div class="prelogin-info">
-{% if 'institution' in pre %}<details open><summary>About the institution</summary><p>{{ school_settings.institution_history or 'School information will appear here.' }}</p>{% if school_settings.institution_religion %}<p><strong>Values:</strong> {{ school_settings.institution_religion }}</p>{% endif %}</details>{% endif %}
-{% if 'history' in pre and school_settings.institution_history %}<details><summary>History</summary><p>{{ school_settings.institution_history }}</p></details>{% endif %}
-{% if 'achievements' in pre and school_settings.institution_performance %}<details><summary>Achievements & performance</summary><p>{{ school_settings.institution_performance }}</p></details>{% endif %}
-{% if 'owners' in pre and school_settings.institution_owners %}<details><summary>School owners / management</summary><p>{{ school_settings.institution_owners }}</p></details>{% endif %}
-{% if 'developer' in pre %}<details><summary>About the developer</summary><p><strong>{{ school_settings.developer_name }}</strong></p><p>{{ school_settings.developer_about or 'Developer information.' }}</p></details>{% endif %}
-{% if 'company' in pre %}<details><summary>About the company</summary><p><strong>{{ school_settings.company_name }}</strong></p><p>{{ school_settings.company_about or 'Company information.' }}</p></details>{% endif %}
-</div>
+<section class="landing-public-content" id="home">
+  <section class="landing-showcase" id="about">
+    <div class="landing-showcase-copy">
+      <div class="eyebrow">Welcome</div>
+      <h1>{{ school_settings.landing_hero_title or ('Welcome to ' ~ portal_title) }}</h1>
+      <p class="landing-lead">{{ school_settings.landing_hero_text or 'One connected place for learning, communication, results, assignments and the everyday work of the school community.' }}</p>
+      <div class="landing-actions">
+        
+        {% if school_settings.institution_history %}<a class="landing-action-secondary" href="#history">Explore our history</a>{% endif %}
+      </div>
+      <div class="landing-trust-line"><span></span><b>Learning · Communication · Results · School services</b></div>
+    </div>
+    <div class="landing-showcase-media">
+      {% if school_settings.landing_show_gallery and (school_settings.institution_image_path or school_settings.institution_image_2_path or school_settings.institution_image_3_path) %}
+      <div class="landing-gallery landing-gallery-featured" aria-label="Institution photographs">
+        {% for path,pos in [(school_settings.institution_image_path,school_settings.institution_image_1_position),(school_settings.institution_image_2_path,school_settings.institution_image_2_position),(school_settings.institution_image_3_path,school_settings.institution_image_3_position)] %}
+          {% if path %}<figure><img src="/{{ path }}" alt="{{ portal_title }}" style="object-position:{{pos or '50% 50%'}}"></figure>{% endif %}
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="landing-placeholder-media"><span>{{ portal_title }}</span><small>Institution information and gallery</small></div>
+      {% endif %}
+    </div>
+  </section>
 
-<section class="landing-hero">
-  <div class="hero-copy landing-heading-scope">
-    <div class="eyebrow">School Portal</div>
-    <h1>Welcome to the <span>{{ portal_title }}</span></h1>
-    <p class="landing-lead">One connected place for learning, communication, results, assignments and the everyday work of your school community.</p>
-    <div class="landing-rule"><span></span><b>Access your portal</b><span></span></div>
-  </div>
-  <div class="landing-accent-panel">
-    <div class="accent-title">Built for a connected school</div>
-    <div class="accent-points"><span>Learning</span><span>Communication</span><span>Results</span><span>School services</span></div>
-  </div>
+  {% if pre %}
+  <section class="landing-about-strip" aria-label="Institution highlights">
+    {% if 'institution' in pre %}<article><span class="eyebrow">About the institution</span><p>{{ school_settings.institution_history or 'School information will appear here.' }}</p>{% if school_settings.institution_religion %}<p><strong>Values:</strong> {{ school_settings.institution_religion }}</p>{% endif %}</article>{% endif %}
+    {% if 'developer' in pre %}<article id="developer"><span class="eyebrow">About the developer</span><p><strong>{{ school_settings.developer_name }}</strong></p><p>{{ school_settings.developer_about or 'Developer information.' }}</p></article>{% endif %}
+    {% if 'company' in pre %}<article><span class="eyebrow">About the company</span><p><strong>{{ school_settings.company_name }}</strong></p><p>{{ school_settings.company_about or 'Company information.' }}</p></article>{% endif %}
+  </section>
+  {% endif %}
+
+  <section class="landing-story-grid">
+    {% if 'history' in pre and school_settings.institution_history %}<article id="history"><span class="eyebrow">Our history</span><h2>Where the institution comes from</h2><p>{{ school_settings.institution_history }}</p></article>{% endif %}
+    {% if 'achievements' in pre and school_settings.institution_performance %}<article id="performance"><span class="eyebrow">Academic performance</span><h2>What the institution is building</h2><p>{{ school_settings.institution_performance }}</p></article>{% endif %}
+    {% if school_settings.institution_religion %}<article id="values"><span class="eyebrow">Religion &amp; values</span><h2>What guides the community</h2><p>{{ school_settings.institution_religion }}</p></article>{% endif %}
+    {% if 'owners' in pre and school_settings.institution_owners %}<article id="owners"><span class="eyebrow">Founders &amp; management</span><h2>People behind the institution</h2><p>{{ school_settings.institution_owners }}</p></article>{% endif %}
+    {% if school_settings.institution_help %}<article id="guidelines"><span class="eyebrow">Curriculum · Dress code · Guidelines</span><h2>Information for our community</h2><p>{{ school_settings.institution_help }}</p></article>{% endif %}
+    {% if school_settings.institution_contact %}<article id="contact"><span class="eyebrow">Vision · Direction · Contact</span><h2>Stay connected to the institution</h2><p>{{ school_settings.institution_contact }}</p></article>{% endif %}
+  </section>
+
+  {% if school_settings.landing_show_dates %}<section class="landing-important-dates" id="dates"><div class="landing-section-heading"><div><div class="eyebrow">School calendar</div><h2>Important dates</h2><p>Upcoming events published by the institution.</p></div></div><div class="date-strip">{% for d in important_dates %}<article class="date-card"><div class="date-day">{{ d.event_date }}</div><strong>{{ d.title }}</strong>{% if d.event_time %}<span>{{ d.event_time }}</span>{% endif %}{% if d.location %}<span>{{ d.location }}</span>{% endif %}</article>{% else %}<div class="landing-empty">No important dates have been published yet.</div>{% endfor %}</div></section>{% endif %}
+
+  {% if school_settings.public_map_query %}<section class="visitor-map" id="visit"><div class="visitor-copy"><div class="eyebrow">Visitors</div><h2>{{school_settings.public_location_title or 'Visit us today at this location'}}</h2><p>{{school_settings.public_address}}</p>{% if school_settings.public_location_notes %}<p>{{school_settings.public_location_notes}}</p>{% endif %}<a class="landing-action-secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{school_settings.public_map_query|urlencode}}">Open location in Maps</a></div><iframe title="Visitor location" src="https://www.google.com/maps?q={{school_settings.public_map_query|urlencode}}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></section>{% endif %}
+
+  <section id="services" class="landing-services-note">
+    <div class="landing-section-heading"><div><div class="eyebrow">One public home</div><h2>Everything important starts here.</h2></div><p>The navigation above is the single doorway to school portals and online services. Public visitors stay here; authenticated users continue into their own secure workspace.</p></div>
+  </section>
+
+  {% if school_settings.landing_announcement or school_settings.landing_contact %}<section class="landing-notices" id="notices">{% if school_settings.landing_announcement %}<article><span class="eyebrow">School notice</span><p>{{ school_settings.landing_announcement }}</p></article>{% endif %}{% if school_settings.landing_contact %}<article><span class="eyebrow">Enquiries</span><p>{{ school_settings.landing_contact }}</p></article>{% endif %}</section>{% endif %}
+
+  {% if setup_required %}<div class="setup-link"><a class="btn btn-ghost btn-block" href="/register">First-time Administrator setup</a></div>{% endif %}
 </section>
-{% if school_settings.landing_show_dates %}<section class="landing-important-dates"><div class="panel-head"><div><div class="eyebrow">School calendar</div><h2>Important dates</h2><p class="muted">Upcoming events published by the institution.</p></div></div><div class="date-strip">{% for d in important_dates %}<article class="date-card"><div class="date-day">{{ d.event_date }}</div><strong>{{ d.title }}</strong>{% if d.event_time %}<span>{{ d.event_time }}</span>{% endif %}{% if d.location %}<span>{{ d.location }}</span>{% endif %}</article>{% else %}<div class="mini-card"><span class="muted">No important dates have been published yet.</span></div>{% endfor %}</div></section>{% endif %}
-{% if school_settings.landing_show_gallery %}{% if school_settings.institution_image_path or school_settings.institution_image_2_path or school_settings.institution_image_3_path %}<section class="landing-gallery">{% for path,pos in [(school_settings.institution_image_path,school_settings.institution_image_1_position),(school_settings.institution_image_2_path,school_settings.institution_image_2_position),(school_settings.institution_image_3_path,school_settings.institution_image_3_position)] %}{% if path %}<figure><img src="/{{ path }}" alt="Institution history" style="object-position:{{pos}}"><figcaption>Institution</figcaption></figure>{% endif %}{% endfor %}</section>{% endif %}{% endif %}
-{% if school_settings.public_map_query %}<section class="visitor-map"><div class="visitor-copy"><div class="eyebrow">Visitors</div><h2>{{school_settings.public_location_title or 'Visit us today at this location'}}</h2><p class="muted">{{school_settings.public_address}}</p>{% if school_settings.public_location_notes %}<p class="muted">{{school_settings.public_location_notes}}</p>{% endif %}<a class="btn btn-primary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{school_settings.public_map_query|urlencode}}">Get directions</a></div><iframe title="Visitor location" src="https://www.google.com/maps?q={{school_settings.public_map_query|urlencode}}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></section>{% endif %}<div class="portal-section-title"><div><div class="eyebrow">Family access</div><h2>Parents and students</h2></div><span class="section-note">One home for the family portal.</span></div><div class="portal-entry-grid"><a class="portal-entry-card portal-family" href="/student"><span class="eyebrow">Student portal</span><strong>Student</strong><span>Use the school email / admission-number account to enter classes, assignments, results and finance.</span><b>Open student portal →</b></a>{% if parent_portal_enabled %}<a class="portal-entry-card portal-family" href="/parent"><span class="eyebrow">Family portal</span><strong>Parent / Guardian</strong><span>View connected children, fees, approved results and school communication.</span><b>Open family portal →</b></a>{% endif %}</div><div class="portal-section-title" style="margin-top:18px"><div><div class="eyebrow">Staff</div><h2>Secure staff workspaces</h2></div><span class="section-note">Admin and ICT stay behind their separate secure entries.</span></div><div class="staff-entry"><a href="/teacher"><strong>Teacher</strong><span class="muted">Attendance, classes, marks and assignments</span></a><a href="/finance"><strong>Finance</strong><span class="muted">Fees, collections, payroll and institution cash</span></a><a href="/librarian"><strong>Library</strong><span class="muted">Books, loans and learner library service</span></a><a href="/driver"><strong>Driver</strong><span class="muted">Trips, routes and live vehicle location</span></a></div>
-{% if school_settings.landing_announcement %}<div class="mini-card" style="margin:14px 0"><strong>School notice</strong><span>{{ school_settings.landing_announcement }}</span></div>{% endif %}
-{% if school_settings.landing_contact %}<div class="mini-card" style="margin:14px 0"><strong>Enquiries</strong><span class="muted">{{ school_settings.landing_contact }}</span></div>{% endif %}
-{% if school_settings.landing_show_roles %}<div class="role-grid" style="display:none">
-  <a class="role-card role-teacher-card" href="/teacher"><span class="role-kicker">Teaching workspace</span><strong>Teacher</strong><span>Classes, attendance, marks, assignments & communication</span><b class="role-arrow">→</b></a>
-  <a class="role-card role-student-card" href="/student"><span class="role-kicker">Learning workspace</span><strong>Student</strong><span>Learning, assignments, results, resources & classes</span><b class="role-arrow">→</b></a>
-  {% if parent_portal_enabled %}<a class="role-card role-parent-card" href="/parent"><span class="role-kicker">Family workspace</span><strong>Parent</strong><span>Fees, report cards, communication & learner progress</span><b class="role-arrow">→</b></a>{% endif %}
-</div>{% endif %}
-<div class="mini-card recovery-entry" style="margin-top:14px"><strong>Forgot your password?</strong><span class="muted">Use your registered username and email to receive a secure reset link without needing your old password.</span><a class="btn btn-ghost mini" style="margin-top:9px;display:inline-flex" href="/forgot-password">Open password recovery</a></div>
-<div class="mini-card" style="margin-top:14px"><strong>Staff access</strong><span class="muted">Finance, ICT, Library and administration use their dedicated secure entry links rather than the public learner portal.</span></div>
-<div class="mini-card" style="margin-top:14px"><strong>Multiple workspaces</strong><span class="muted">Different role logins can remain open in separate browser tabs.</span></div>{% if setup_required %}<div class="setup-link"><a class="btn btn-ghost btn-block" href="/register">First-time Administrator setup</a></div>{% endif %}
+
 {% else %}
-<div class="eyebrow">{{ login_role }} access</div><h1>Log in</h1>{% if success %}<div class="flash success">{{ success }}</div>{% endif %}{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}<form method="post" action="/login?role={{ login_role }}" class="stack-form"><input type="hidden" name="role" value="{{ login_role }}"><label><span>{% if login_role == 'Student' %}Student name{% else %}Username{% endif %}</span><input name="username" autocomplete="username" required placeholder="{% if login_role == 'Student' %}Your full two/three names{% else %}Username{% endif %}"></label><label><span>Password{% if login_role == 'Student' %} (Admission number){% endif %}</span><div class="password-wrap"><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="loginPassword" aria-label="Show password">Show</button></div></label><button class="btn btn-primary" type="submit">Log in as {{ login_role }}</button></form>{% if login_role == 'Student' %}<p class="muted" style="margin-top:12px">Students: enter your exact full name and the admission number generated when you were added to the school.</p>{% endif %}<p class="muted" style="margin-top:14px"><a href="/forgot-password">Forgot password?</a> &nbsp;·&nbsp; <a href="/">Choose another role</a></p>
+<div class="eyebrow">{{ login_role }} access</div><h1>Log in</h1>{% if success %}<div class="flash success">{{ success }}</div>{% endif %}{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}<form method="post" action="/login?role={{ login_role }}" class="stack-form"><input type="hidden" name="role" value="{{ login_role }}"><label><span>{% if login_role == 'Student' %}School email / username{% else %}Username{% endif %}</span><input name="username" autocomplete="username" required placeholder="{% if login_role == 'Student' %}School email or school username{% else %}Username{% endif %}"></label><label><span>Password</span><div class="password-wrap"><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="loginPassword" aria-label="Show password">Show</button></div></label><button class="btn btn-primary" type="submit">Log in as {{ login_role }}</button></form>{% if login_role == 'Student' %}<p class="muted" style="margin-top:12px">Students use the credentials issued for their school account. Your admission number identifies your learner record; it is not presented as the permanent e-learning password.</p>{% endif %}<div class="login-links-row"><a class="forgot-password-link" href="/forgot-password">Forgot password?</a><a class="visitor-qr-button" href="#" data-open-visitor-qr>Visitor QR</a><a class="back-role-link" href="/">Choose another role</a></div>
+<div class="visitor-qr-modal" id="visitorQrModal" hidden role="dialog" aria-modal="true" aria-labelledby="visitorQrTitle"><div class="visitor-qr-backdrop" data-close-visitor-qr></div><div class="visitor-qr-dialog"><button type="button" class="visitor-qr-close" data-close-visitor-qr aria-label="Close">×</button><div class="eyebrow">Visitor access</div><h2 id="visitorQrTitle">Scan to open the public school portal</h2><img src="{{ portal_qr_data_uri }}" alt="Visitor QR code"><p>Visitors can scan this code to open the institution's public portal, location and published information.</p></div></div>
 {% endif %}
-</section>{% if login_role not in ['Student','Parent'] %}<section class="panel glass" style="margin-top:18px"><div class="panel-head"><div><div class="eyebrow">Staff quick sign-in</div><h3>Sign in with your personal QR</h3><p class="muted">Available to teachers, ICT, finance, librarians and other staff after their first normal password login. Students and parents do not use staff QR sign-in.</p></div></div><div class="qr-login-grid"><div class="qr-camera-card"><video id="staffQrVideo" playsinline muted></video><div id="staffQrStatus" class="muted">Choose “Start camera” to scan a staff login QR.</div><div class="quick-actions"><button class="btn btn-primary" id="startStaffQr" type="button">Start camera</button><button class="btn btn-ghost" id="stopStaffQr" type="button" disabled>Stop</button></div></div><div><p><strong>Already have your QR?</strong></p><p class="muted">Scan the QR with the same device or another device. The QR contains an account-specific link, so it does not simply approve the Teacher or ICT endpoint.</p><div class="mini-card"><strong>First login</strong><span class="muted">Use your name, username and password once. After that, your personal QR becomes available for faster sign-in.</span></div><div class="mini-card" style="margin-top:10px"><strong>Need the normal sign-in?</strong><span class="muted">The name-and-password option remains available every time.</span></div></div></div></section>{% endif %}<section class="panel glass" style="margin-top:18px"><div class="panel-head"><div><div class="eyebrow">Institution portal</div><h3>Open the institution portal</h3></div></div><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><img src="{{ portal_qr_data_uri }}" alt="Portal QR code" width="170" height="170" style="background:white;padding:8px;border-radius:12px"><div><p class="muted">This QR opens the public institution portal. It is not a personal login QR.</p>{% if parent_portal_enabled %}<p class="muted">Parent / Guardian access is enabled for this institution.</p>{% else %}<p class="muted">Parent / Guardian accounts are disabled for this institution mode.</p>{% endif %}</div></div></section></main><script>(function(){var splash=document.getElementById('welcomeSplash');if(!splash)return;var d={{welcome_animation_duration_ms|int}};window.setTimeout(function(){splash.hidden=true;},Math.max(900,d+100));})();</script><script>
+</section></main><script>(function(){var splash=document.getElementById('welcomeSplash');if(!splash)return;var d={{welcome_animation_duration_ms|int}};window.setTimeout(function(){splash.hidden=true;},Math.max(900,d+100));})();</script><script>
 (function(){
-  const video=document.getElementById('staffQrVideo'), start=document.getElementById('startStaffQr'), stop=document.getElementById('stopStaffQr'), status=document.getElementById('staffQrStatus');
-  if(!video||!start)return;
-  let stream=null, timer=null, detector=null, busy=false;
-  async function stopScan(){ if(timer){clearInterval(timer);timer=null;} if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;} start.disabled=false; stop.disabled=true; video.srcObject=null; }
-  async function scanFrame(){ if(!detector||busy||!video.videoWidth)return; busy=true; try{ const codes=await detector.detect(video); if(codes&&codes.length&&codes[0].rawValue){ status.textContent='QR found. Opening your dashboard…'; await stopScan(); window.location.href=codes[0].rawValue; return; } }catch(e){} busy=false; }
-  start.addEventListener('click',async()=>{
-    try{
-      if(!('BarcodeDetector' in window)){status.textContent='This browser does not provide a camera QR scanner. Use the phone camera app to scan your personal QR instead.';return;}
-      detector=new BarcodeDetector({formats:['qr_code']});
-      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-      video.srcObject=stream; await video.play(); start.disabled=true; stop.disabled=false; status.textContent='Point the camera at your personal staff login QR.'; timer=setInterval(scanFrame,220);
-    }catch(e){status.textContent='Camera access was not available. Allow camera permission or use your normal name-and-password sign-in.'; await stopScan();}
+  const menu=document.getElementById('landingNav');
+  const toggle=document.getElementById('landingMenuToggle');
+  if(toggle && menu){
+    toggle.addEventListener('click',function(){
+      const open=menu.classList.toggle('open');
+      toggle.setAttribute('aria-expanded',String(open));
+      document.body.classList.toggle('landing-menu-open',open);
+    });
+  }
+  document.querySelectorAll('.landing-nav-trigger').forEach(function(trigger){
+    trigger.addEventListener('click',function(e){
+      e.preventDefault();
+      const parent=trigger.closest('.landing-nav-menu');
+      const open=parent.classList.toggle('open');
+      trigger.setAttribute('aria-expanded',String(open));
+      menu && menu.querySelectorAll('.landing-nav-menu').forEach(function(other){
+        if(other!==parent){other.classList.remove('open'); const t=other.querySelector('.landing-nav-trigger'); if(t)t.setAttribute('aria-expanded','false');}
+      });
+    });
   });
-  stop.addEventListener('click',stopScan);
+  document.addEventListener('click',function(e){
+    if(menu && !e.target.closest('.landing-nav') && !e.target.closest('#landingMenuToggle')){menu.classList.remove('open'); document.body.classList.remove('landing-menu-open'); if(toggle)toggle.setAttribute('aria-expanded','false');}
+  });
+  menu && menu.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){menu.classList.remove('open');document.body.classList.remove('landing-menu-open');if(toggle)toggle.setAttribute('aria-expanded','false');});});
+  const modal=document.getElementById('visitorQrModal');
+  document.querySelectorAll('[data-open-visitor-qr]').forEach(function(btn){btn.addEventListener('click',function(e){e.preventDefault();if(modal){modal.hidden=false;document.body.classList.add('modal-open');}})});
+  document.querySelectorAll('[data-close-visitor-qr]').forEach(function(btn){btn.addEventListener('click',function(e){e.preventDefault();if(modal){modal.hidden=true;document.body.classList.remove('modal-open');}})});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape' && modal && !modal.hidden){modal.hidden=true;document.body.classList.remove('modal-open');}});
 })();
 </script>
-<script>document.addEventListener('click',function(e){const b=e.target.closest('.password-toggle');if(!b)return;const i=document.getElementById(b.dataset.passwordTarget);if(!i)return;i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';});</script><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(function(err){console.warn("Offline mode unavailable",err);});}</script><div style="position:fixed;right:14px;bottom:14px;z-index:90;display:flex;gap:8px"><a class="btn btn-ghost mini" href="/system-help">Help</a><a class="btn btn-primary mini" href="/ai-assistant">AI</a></div>{% include '_footer.html' %}</body></html>
+<script>document.addEventListener('click',function(e){const b=e.target.closest('.password-toggle');if(!b)return;const i=document.getElementById(b.dataset.passwordTarget);if(!i)return;i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';});</script><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(function(err){console.warn("Offline mode unavailable",err);});}</script>{% include '_footer.html' %}</body></html>

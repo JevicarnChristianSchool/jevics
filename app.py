@@ -64,8 +64,8 @@ PULSE_PEER_URL = os.environ.get("PULSE_PEER_URL", "https://breathe-xozy.onrender
 PULSE_TIMEOUT_SECONDS = max(1, min(10, int(os.environ.get("PULSE_TIMEOUT_SECONDS", "4"))))
 PULSE_ALLOWED_CALLBACK_HOSTS = {h.strip().lower() for h in os.environ.get("PULSE_ALLOWED_CALLBACK_HOSTS", "").split(",") if h.strip()}
 ALLOWED_RESTORE_EXT = {"db", "sqlite", "sqlite3"}
-PUBLIC_ROLES = ("Teacher", "Student", "Parent")
-HIDDEN_ROLES = ("Admin", "ICT", "Finance", "Librarian")
+PUBLIC_ROLES = ("Teacher", "Student", "Parent", "Librarian", "Driver")
+HIDDEN_ROLES = ("Admin", "ICT", "Finance")
 QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian"}
 QR_LOGIN_WORKSPACES = {"Teaching", "Driver", "Reception", "Guard", "Cook", "Other Staff"}
 RECEPTION_WORKSPACE = "Reception"
@@ -1967,6 +1967,7 @@ def role_target(role: str) -> str:
         "Student": url_for("student_dashboard"),
         "Parent": url_for("parent_dashboard"),
         "Librarian": url_for("librarian_dashboard"),
+        "Driver": url_for("driver_dashboard"),
     }[role]
 
 
@@ -4611,10 +4612,11 @@ def parent_dashboard():
 @app.route("/library")
 @login_required
 def library():
-    if not school_settings()["library_enabled"] and current_user()["role"] not in {"Admin","ICT","Librarian"}: abort(404)
+    role=current_user()["role"]
+    if role not in {"Admin","ICT","Librarian","Student"}: abort(403)
+    if not school_settings()["library_enabled"] and role not in {"Admin","ICT","Librarian"}: abort(404)
     class_level=request.args.get("class","").strip(); subject=request.args.get("subject","").strip()
     where=["active=1"]; params=[]
-    role=current_user()["role"]
     if role=="Student":
         st=portal_student()
         class_level=(st["grade"] if st else class_level) or ""
@@ -4908,9 +4910,15 @@ def ict_logo():
     if ext not in {"png","jpg","jpeg","webp","svg"}:
         flash("Logo must be PNG, JPG, JPEG, WEBP or SVG.", "danger")
         return redirect(url_for("ict_dashboard" if current_user()["role"]=="ICT" else "admin_dashboard"))
-    name="school-logo."+ext
-    path=UPLOAD_DIR/name; file.save(path)
+    folder=UPLOAD_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    name=f"school-logo-{uuid.uuid4().hex[:12]}.{ext}"
+    path=folder/name; file.save(path)
+    old_path=school_settings()["logo_path"] or ""
     execute("UPDATE school_settings SET logo_path=? WHERE id=1", ("uploads/"+name,))
+    if old_path.startswith("uploads/school-logo-"):
+        try: (UPLOAD_DIR / Path(old_path).name).unlink(missing_ok=True)
+        except Exception: pass
     flash("School logo updated.", "success")
     return redirect(url_for("ict_dashboard" if current_user()["role"]=="ICT" else "admin_dashboard"))
 
@@ -5079,6 +5087,7 @@ def notifications_api():
 @login_required
 def online_classes():
     user=current_user()
+    if user["role"] not in {"Admin","ICT","Teacher","Student","Parent"}: abort(403)
     sessions=q("SELECT cs.*,u.full_name AS teacher_name FROM class_sessions cs JOIN users u ON u.id=cs.teacher_user_id WHERE cs.active=1 AND (cs.starts_at >= datetime('now','-1 day') OR cs.ends_at IS NULL OR cs.ends_at >= datetime('now','-1 day')) ORDER BY cs.starts_at",())
     if user["role"]=="Teacher": sessions=[r for r in sessions if r["teacher_user_id"]==user["id"]] + [r for r in sessions if r["teacher_user_id"]!=user["id"]]
     elif user["role"]=="Student" and user["student_id"]:

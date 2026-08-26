@@ -150,6 +150,13 @@
   const toggle=document.getElementById('landingMenuToggle');
   if(toggle && menu){
     toggle.addEventListener('click',function(){
+      const isDesktop=window.matchMedia('(min-width:821px)').matches;
+      if(isDesktop){
+        const collapsed=menu.classList.toggle('menu-collapsed');
+        toggle.setAttribute('aria-expanded',String(!collapsed));
+        toggle.querySelector('span').textContent=collapsed?'☰':'×';
+        return;
+      }
       const open=menu.classList.toggle('open');
       toggle.setAttribute('aria-expanded',String(open));
       document.body.classList.toggle('landing-menu-open',open);

@@ -4683,9 +4683,29 @@ def institution_save():
     image=request.files.get("institution_image"); image_path=school_settings()["institution_image_path"] or ""
     if image and image.filename:
         dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True); fname=secure_filename(image.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image.save(out); image_path="uploads/institution/"+out.name
-    # Attach multiple images/videos to each About section.
+    # Remove media explicitly marked by the editor, then attach new images/videos.
+    try:
+        removed_by_section=json.loads(request.form.get("about_remove_media", "{}") or "{}")
+        if not isinstance(removed_by_section, dict): removed_by_section={}
+    except Exception:
+        removed_by_section={}
     for i,item in enumerate(about_sections):
         media=list(item.get("media",[]))
+        removed=set(str(x) for x in (removed_by_section.get(str(i), []) or []) if str(x).strip())
+        if removed:
+            kept=[]
+            for m in media:
+                path=str(m.get("path", ""))
+                if path in removed:
+                    try:
+                        target=(UPLOAD_DIR/Path(path).relative_to("uploads")).resolve() if path.startswith("uploads/") else None
+                        if target and UPLOAD_DIR.resolve() in target.parents:
+                            target.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                else:
+                    kept.append(m)
+            media=kept
         for uploaded in request.files.getlist(f"about_media_{i}"):
             if not uploaded or not uploaded.filename: continue
             ext=Path(uploaded.filename).suffix.lower()

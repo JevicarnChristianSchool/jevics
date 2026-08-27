@@ -50,13 +50,14 @@
       </div>
     </div>
     <a href="#dates">Calendar</a>
+    <a href="#visitor-qr">QR</a>
     <div class="landing-nav-menu">
       <button type="button" class="landing-nav-trigger" aria-expanded="false">Portals <span aria-hidden="true">⌄</span></button>
       <div class="landing-dropdown landing-dropdown-portal">
         <div class="landing-drop-title">School services</div>
-        <a href="/online-classes">E-Learning / Online Classes</a>
+        <a href="/login?role=E-Learning&amp;next=%2Fonline-classes">E-Learning / Online Classes</a>
         <a href="/communication">School Communication</a>
-        <a href="/library">Library Resources</a>
+        <a href="/login?role=Library&amp;next=%2Flibrary">Library Resources</a>
         {% if school_settings.public_map_query %}<a href="#visit">Visitor location</a>{% endif %}
       </div>
     </div>
@@ -66,14 +67,52 @@
       <button type="button" class="landing-nav-trigger landing-nav-login" aria-expanded="false">Portal Login <span aria-hidden="true">⌄</span></button>
       <div class="landing-dropdown landing-dropdown-portal-login">
         <div class="landing-drop-title">Choose your portal</div>
-        <a href="/teacher">Teacher Portal</a>
-        {% if parent_portal_enabled %}<a href="/parent">Parent / Guardian Portal</a>{% endif %}
-        <a href="/student">Student Portal</a>
-        <a href="/librarian">Librarian Portal</a>
-        <a href="/driver">Driver Portal</a>
+        <a href="/login?role=Teacher&amp;next=%2Fteacher%2Fdashboard">Teacher Portal</a>
+        {% if parent_portal_enabled %}<a href="/login?role=Parent&amp;next=%2Fparent-dashboard">Parent / Guardian Portal</a>{% endif %}
+        <a href="/login?role=Student&amp;next=%2Fstudent%2Fdashboard">Student Portal</a>
+        <a href="/login?role=E-Learning&amp;next=%2Fonline-classes">E-Learning Portal</a>
+        <a href="/login?role=Library&amp;next=%2Flibrary">Library Portal</a>
+        <a href="/login?role=Librarian&amp;next=%2Flibrarian-dashboard">Librarian Portal</a>
+        <a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver Portal</a>
       </div>
     </div>
   </nav>
+  <div class="landing-mobile-nav" aria-label="Mobile school navigation">
+    <div class="landing-mobile-topbar">
+      <a class="landing-mobile-brand" href="#home" aria-label="School Portal home"><span class="landing-mobile-brand-mark">▦</span><span>{{ portal_title }}</span></a>
+      <div class="landing-mobile-tools" aria-label="Page tools">
+        <button type="button" data-mobile-text="decrease" aria-label="Decrease text size">A−</button>
+        <button type="button" data-mobile-text="increase" aria-label="Increase text size">A+</button>
+        <button type="button" data-mobile-share aria-label="Share portal">↗</button>
+      </div>
+    </div>
+    <nav class="landing-mobile-links" aria-label="Primary mobile navigation">
+      <a class="is-active" href="#home">Home</a>
+      <button type="button" class="mobile-link-button" data-mobile-panel="about" aria-expanded="false">About <span>⌄</span></button>
+      <a href="#dates">Calendar</a>
+      <button type="button" class="mobile-link-button" data-mobile-panel="portals" aria-expanded="false">Portals <span>⌄</span></button>
+      <a href="#contact">Contacts</a>
+    </nav>
+    <div class="landing-mobile-panel-wrap">
+      <div class="landing-mobile-panel" data-mobile-panel-target="about">
+        {% if school_settings.institution_history %}<a href="#history">History</a>{% endif %}
+        {% if school_settings.institution_owners %}<a href="#owners">Founder</a>{% endif %}
+        {% if school_settings.institution_performance %}<a href="#performance">Curriculum</a>{% endif %}
+        {% if school_settings.institution_help %}<a href="#guidelines">Dress code</a>{% endif %}
+        {% if school_settings.developer_name %}<a href="#developer">Developer</a>{% endif %}
+      </div>
+      <div class="landing-mobile-panel" data-mobile-panel-target="portals">
+        <a href="/login?role=Teacher&amp;next=%2Fteacher%2Fdashboard">Teacher</a>
+        {% if parent_portal_enabled %}<a href="/login?role=Parent&amp;next=%2Fparent-dashboard">Parent / Guardian</a>{% endif %}
+        <a href="/login?role=Student&amp;next=%2Fstudent%2Fdashboard">Student</a>
+        <a href="/login?role=E-Learning&amp;next=%2Fonline-classes">E-Learning</a>
+        <a href="/login?role=Library&amp;next=%2Flibrary">Library</a>
+        <a href="/login?role=Librarian&amp;next=%2Flibrarian-dashboard">Librarian</a>
+        <a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver</a>
+      </div>
+    </div>
+  </div>
+
 </header>
 
 {% if not login_role %}
@@ -83,7 +122,7 @@
     <div class="landing-showcase-copy">
       <div class="eyebrow">Welcome</div>
       <h1>{{ school_settings.landing_hero_title or ('Welcome to ' ~ portal_title) }}</h1>
-      <p class="landing-lead">{{ school_settings.landing_hero_text or 'One connected place for learning, communication, results, assignments and the everyday work of the school community.' }}</p>
+      <p class="landing-lead">{{ school_settings.landing_hero_text or 'Learning, character, community and opportunity — in one school community.' }}</p>
       <div class="landing-actions">
         
         {% if school_settings.institution_history %}<a class="landing-action-secondary" href="#history">Explore our history</a>{% endif %}
@@ -91,11 +130,12 @@
       <div class="landing-trust-line"><span></span><b>Learning · Communication · Results · School services</b></div>
     </div>
     <div class="landing-showcase-media">
-      {% if school_settings.landing_show_gallery and (school_settings.institution_image_path or school_settings.institution_image_2_path or school_settings.institution_image_3_path) %}
+      {% if school_settings.landing_show_gallery and (school_settings.institution_image_path or school_settings.institution_image_2_path or school_settings.institution_image_3_path or about_first_image) %}
       <div class="landing-gallery landing-gallery-featured" aria-label="Institution photographs">
         {% for path,pos in [(school_settings.institution_image_path,school_settings.institution_image_1_position),(school_settings.institution_image_2_path,school_settings.institution_image_2_position),(school_settings.institution_image_3_path,school_settings.institution_image_3_position)] %}
           {% if path %}<figure><img src="/{{ path }}" alt="{{ portal_title }}" style="object-position:{{pos or '50% 50%'}}"></figure>{% endif %}
         {% endfor %}
+        {% if not school_settings.institution_image_path and not school_settings.institution_image_2_path and not school_settings.institution_image_3_path and about_first_image %}<figure><img src="/{{ about_first_image }}" alt="{{ portal_title }}"></figure>{% endif %}
       </div>
       {% else %}
       <div class="landing-placeholder-media"><span>{{ portal_title }}</span><small>Institution information and gallery</small></div>
@@ -131,35 +171,91 @@
 
   {% if school_settings.public_map_query %}<section class="visitor-map" id="visit"><div class="visitor-copy"><div class="eyebrow">Visitors</div><h2>{{school_settings.public_location_title or 'Visit us today at this location'}}</h2><p>{{school_settings.public_address}}</p>{% if school_settings.public_location_notes %}<p>{{school_settings.public_location_notes}}</p>{% endif %}<a class="landing-action-secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{school_settings.public_map_query|urlencode}}">Open location in Maps</a></div><iframe title="Visitor location" src="https://www.google.com/maps?q={{school_settings.public_map_query|urlencode}}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></section>{% endif %}
 
+
+  {% if public_contacts %}<section class="landing-contacts" id="contact"><div class="landing-section-heading"><div><div class="eyebrow">Contacts</div><h2>Reach the institution</h2><p>Official contacts published by the administration.</p></div></div><div class="landing-contact-grid">{% for c in public_contacts %}<article class="landing-contact-card"><h3>{{c.name}}</h3>{% if c.role_title %}<p class="landing-contact-role">{{c.role_title}}</p>{% endif %}{% if c.phone %}<a href="tel:{{c.phone}}">{{c.phone}}</a>{% endif %}{% if c.email %}<a href="mailto:{{c.email}}">{{c.email}}</a>{% endif %}{% if c.link %}<a href="{{c.link}}" target="_blank" rel="noopener">Open contact link</a>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+
   <section id="services" class="landing-services-note">
     <div class="landing-section-heading"><div><div class="eyebrow">Welcome</div><h2>{{ school_settings.school_name }} — a place for learning, community and growth.</h2></div><p>Explore the institution's story, important dates, visitor information and secure portals from the navigation above.</p></div>
   </section>
 
   {% if school_settings.landing_announcement or school_settings.landing_contact %}<section class="landing-notices" id="notices">{% if school_settings.landing_announcement %}<article><span class="eyebrow">School notice</span><p>{{ school_settings.landing_announcement }}</p></article>{% endif %}{% if school_settings.landing_contact %}<article><span class="eyebrow">Enquiries</span><p>{{ school_settings.landing_contact }}</p></article>{% endif %}</section>{% endif %}
 
+  <section class="landing-visitor-qr" id="visitor-qr"><div><div class="eyebrow">Visitor QR</div><h2>Share the school portal</h2><p>Visitors can scan this code to open this public school homepage directly.</p><div class="landing-qr-actions"><a class="landing-action-secondary" href="/visitor-qr.png">Download QR</a><button class="landing-action-secondary" type="button" data-share-visitor-qr>Share QR</button></div></div><div class="landing-qr-card"><img src="{{ portal_qr_data_uri }}" alt="Visitor QR code"><small>{{portal_title}}</small></div></div></section>
+
+
   {% if setup_required %}<div class="setup-link"><a class="btn btn-ghost btn-block" href="/register">First-time Administrator setup</a></div>{% endif %}
 </section>
 
 {% else %}
-<div class="eyebrow">{{ login_role }} access</div><h1>Log in</h1>{% if success %}<div class="flash success">{{ success }}</div>{% endif %}{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}<form method="post" action="/login?role={{ login_role }}" class="stack-form"><input type="hidden" name="role" value="{{ login_role }}"><label><span>{% if login_role == 'Student' %}School email / username{% else %}Username{% endif %}</span><input name="username" autocomplete="username" required placeholder="{% if login_role == 'Student' %}School email or school username{% else %}Username{% endif %}"></label><label><span>Password</span><div class="password-wrap"><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="loginPassword" aria-label="Show password">Show</button></div></label><button class="btn btn-primary" type="submit">Log in as {{ login_role }}</button></form>{% if login_role == 'Student' %}<p class="muted" style="margin-top:12px">Students use the credentials issued for their school account. Your admission number identifies your learner record; it is not presented as the permanent e-learning password.</p>{% endif %}<div class="login-links-row"><a class="forgot-password-link" href="/forgot-password">Forgot password?</a><a class="visitor-qr-button" href="#" data-open-visitor-qr>Visitor QR</a><a class="back-role-link" href="/">Choose another role</a></div>
+{% if e_learning_login|default(false) %}
+<div class="eyebrow">Secure e-learning</div><h1>Enter the E-Learning Portal</h1><p class="muted" style="font-size:17px;line-height:1.7">Learners use their generated school email and admission number; staff use their normal school account username/email and password. Your account's role decides which learning dashboard opens.</p>{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}{% if success %}<div class="flash success">{{ success }}</div>{% endif %}<section class="elearn-login-box"><form method="post" action="/login?role=E-Learning" class="stack-form"><input type="hidden" name="role" value="E-Learning"><input type="hidden" name="next" value="{{ next_url or '/online-classes' }}"><label><span>School email / username</span><input name="username" autocomplete="username" required placeholder="staff username or student@school.co.ke"></label><label><span>Password / first-access admission number</span><div class="password-wrap"><input id="eLearningPassword" type="password" name="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="eLearningPassword">Show</button></div></label><button class="btn btn-primary" type="submit">Enter E-Learning</button></form><p class="muted" style="margin:12px 0 0">Students can use their admission number for the first-access student credential; staff use the password issued for their school account. After sign-in, the system keeps the account's own role and permissions.</p></section><div class="login-links-row"><a class="forgot-password-link" href="/forgot-password">Forgot password?</a><a class="back-role-link" href="/">Back to school portal</a></div>
+{% else %}
+<div class="eyebrow">{% if login_context %}{{ login_context }} access{% else %}{{ login_role }} access{% endif %}</div><h1>Log in</h1>{% if success %}<div class="flash success">{{ success }}</div>{% endif %}{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}<form method="post" action="/login?role={{ login_role }}{% if next_url %}&next={{ next_url|urlencode }}{% endif %}" class="stack-form"><input type="hidden" name="role" value="{{ login_role }}"><input type="hidden" name="next" value="{{ next_url }}"><label><span>{% if login_role == 'Student' %}School email / username{% elif login_context %}School email / username{% else %}Username{% endif %}</span><input name="username" autocomplete="username" required placeholder="{% if login_role == 'Student' or login_context %}School email or school username{% else %}Username{% endif %}"></label><label><span>Password</span><div class="password-wrap"><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="loginPassword" aria-label="Show password">Show</button></div></label><button class="btn btn-primary" type="submit">Log in{% if login_context %} to {{ login_context }}{% elif login_role %} as {{ login_role }}{% endif %}</button></form>{% if login_role == 'Student' %}<p class="muted" style="margin-top:12px">Learners sign in with the school email generated from their admission number (for example, ADM001@school.ac.ke) and the admission number itself as the password (ADM001). The school email domain can be changed by the administrator.</p>{% endif %}<div class="login-links-row"><a class="forgot-password-link" href="/forgot-password">Forgot password?</a><a class="visitor-qr-button" href="#" data-open-visitor-qr>Visitor QR</a><a class="back-role-link" href="/">Choose another role</a></div>
 <div class="visitor-qr-modal" id="visitorQrModal" hidden role="dialog" aria-modal="true" aria-labelledby="visitorQrTitle"><div class="visitor-qr-backdrop" data-close-visitor-qr></div><div class="visitor-qr-dialog"><button type="button" class="visitor-qr-close" data-close-visitor-qr aria-label="Close">×</button><div class="eyebrow">Visitor access</div><h2 id="visitorQrTitle">Scan to open the public school portal</h2><img src="{{ portal_qr_data_uri }}" alt="Visitor QR code"><p>Visitors can scan this code to open the institution's public portal, location and published information.</p></div></div>
 {% endif %}
+{% endif %}
 </section></main><script>(function(){var splash=document.getElementById('welcomeSplash');if(!splash)return;var d={{welcome_animation_duration_ms|int}};window.setTimeout(function(){splash.hidden=true;},Math.max(900,d+100));})();</script><script>
+(function(){
+  const root=document.querySelector('.landing-mobile-nav');
+  if(!root)return;
+  const closePanels=function(){
+    root.querySelectorAll('.landing-mobile-panel').forEach(function(p){p.classList.remove('open');});
+    root.querySelectorAll('.mobile-link-button').forEach(function(b){b.setAttribute('aria-expanded','false');});
+  };
+  root.querySelectorAll('.mobile-link-button').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      const key=btn.dataset.mobilePanel;
+      const panel=root.querySelector('[data-mobile-panel-target="'+key+'"]');
+      if(!panel)return;
+      const open=panel.classList.contains('open');
+      closePanels();
+      if(!open){panel.classList.add('open');btn.setAttribute('aria-expanded','true');}
+    });
+  });
+  root.querySelectorAll('.landing-mobile-panel a').forEach(function(a){a.addEventListener('click',closePanels);});
+  const textButtons=root.querySelectorAll('[data-mobile-text]');
+  const applyText=function(action){
+    const current=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mobile-text-scale')||'1')||1;
+    let next=action==='increase'?Math.min(1.14,current+0.07):Math.max(.93,current-.07);
+    document.documentElement.style.setProperty('--mobile-text-scale',String(next));
+    document.body.style.setProperty('--mobile-text-scale',String(next));
+    document.body.style.fontSize=(100*next)+'%';
+  };
+  textButtons.forEach(function(btn){btn.addEventListener('click',function(){applyText(btn.dataset.mobileText);});});
+  const share=root.querySelector('[data-mobile-share]');
+  if(share){share.addEventListener('click',async function(){
+    try{
+      if(navigator.share){await navigator.share({title:document.title,text:'Open the school portal',url:window.location.href});}
+      else if(navigator.clipboard){await navigator.clipboard.writeText(window.location.href);share.textContent='✓';setTimeout(function(){share.textContent='↗';},1400);}
+    }catch(e){}
+  });}
+})();
+</script>
+<script>
 (function(){
   const menu=document.getElementById('landingNav');
   const toggle=document.getElementById('landingMenuToggle');
   if(toggle && menu){
-    toggle.addEventListener('click',function(){
+    let suppressClickUntil=0;
+    const openLandingMenu=function(e){
+      if(e){e.preventDefault();e.stopPropagation();}
       const isDesktop=window.matchMedia('(min-width:821px)').matches;
       if(isDesktop){
         const collapsed=menu.classList.toggle('menu-collapsed');
         toggle.setAttribute('aria-expanded',String(!collapsed));
-        toggle.querySelector('span').textContent=collapsed?'☰':'×';
+        const icon=toggle.querySelector('span'); if(icon) icon.textContent=collapsed?'☰':'×';
         return;
       }
       const open=menu.classList.toggle('open');
       toggle.setAttribute('aria-expanded',String(open));
       document.body.classList.toggle('landing-menu-open',open);
+    };
+    toggle.addEventListener('click',function(e){
+      if(Date.now()<suppressClickUntil){e.preventDefault();e.stopPropagation();return;}
+      openLandingMenu(e);
+    });
+    toggle.addEventListener('pointerup',function(e){
+      if(e.pointerType==='touch'){suppressClickUntil=Date.now()+650;openLandingMenu(e);}
     });
   }
   document.querySelectorAll('.landing-nav-trigger').forEach(function(trigger){
@@ -183,4 +279,15 @@
   document.addEventListener('keydown',function(e){if(e.key==='Escape' && modal && !modal.hidden){modal.hidden=true;document.body.classList.remove('modal-open');}});\n  document.querySelectorAll('.about-more-btn').forEach(function(btn){btn.addEventListener('click',function(){const box=btn.previousElementSibling;if(!box)return;const expanded=box.classList.toggle('expanded');if(expanded){box.classList.remove('is-long');btn.textContent='View less';}else{box.classList.add('is-long');btn.textContent='View more';}});});\n  document.querySelectorAll('.about-media-more').forEach(function(btn){btn.addEventListener('click',function(){const wrap=btn.parentElement;const open=wrap.classList.toggle('open');btn.textContent=open?'Show less media':'View more media';});});\n
 })();
 </script>
-<script>document.addEventListener('click',function(e){const b=e.target.closest('.password-toggle');if(!b)return;const i=document.getElementById(b.dataset.passwordTarget);if(!i)return;i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';});</script><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(function(err){console.warn("Offline mode unavailable",err);});}</script>{% include '_footer.html' %}</body></html>
+<script>document.addEventListener('click',function(e){const b=e.target.closest('.password-toggle');if(!b)return;const i=document.getElementById(b.dataset.passwordTarget);if(!i)return;i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';});</script><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(function(err){console.warn("Offline mode unavailable",err);});}</script>{% include '_footer.html' %}
+<script>
+(function(){
+ const btn=document.querySelector('[data-share-visitor-qr]');
+ if(!btn)return;
+ btn.addEventListener('click',async function(){
+   const url=window.location.origin + '/visitor-qr.png';
+   try{if(navigator.share){await navigator.share({title:'Visitor QR',text:'Scan to open the school portal',url:url});}else{await navigator.clipboard.writeText(url);btn.textContent='QR link copied';setTimeout(()=>btn.textContent='Share QR',1800);}}catch(e){}
+ });
+})();
+</script>
+</body></html>

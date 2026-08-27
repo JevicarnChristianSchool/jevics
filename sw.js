@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "school-system";
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v39";
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline";
 const SHELL = ["/","/login","/static/css/style.css","/static/js/app.js","/static/manifest.json","/static/icons/icon-192.png","/static/icons/icon-512.png","/favicon.ico",OFFLINE_URL];

@@ -1,7 +1,8 @@
 const CACHE_PREFIX = "school-system";
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v39";
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline";
+const PRIVATE_PREFIXES = ["/admin","/finance-dashboard","/teacher","/student","/parent","/librarian","/driver","/communication","/library","/online-classes","/e-learning","/notifications"];
 const SHELL = ["/","/login","/static/css/style.css","/static/js/app.js","/static/manifest.json","/static/icons/icon-192.png","/static/icons/icon-512.png","/favicon.ico",OFFLINE_URL];
 self.addEventListener("install", event => { event.waitUntil((async()=>{ const cache=await caches.open(CACHE_NAME); await Promise.all(SHELL.map(async url=>{try{await cache.add(url);}catch(_){}})); await self.skipWaiting(); })()); });
 self.addEventListener("activate", event => { event.waitUntil((async()=>{ const keys=await caches.keys(); await Promise.all(keys.filter(k=>k.startsWith(`${CACHE_PREFIX}-`)&&k!==CACHE_NAME).map(k=>caches.delete(k))); await self.clients.claim(); })()); });
@@ -10,6 +11,7 @@ self.addEventListener("fetch", event => {
   const request = event.request;
   if(request.method !== "GET") return;
   const url = new URL(request.url);
+  const isPrivate = PRIVATE_PREFIXES.some(p=>url.pathname===p || url.pathname.startsWith(p+"/"));
   if(url.origin !== self.location.origin) return;
   if(url.pathname === "/logout") {
     event.respondWith((async()=>{
@@ -18,5 +20,9 @@ self.addEventListener("fetch", event => {
     })());
     return;
   }
-  event.respondWith(networkFirst(request));
+  if(isPrivate){
+    event.respondWith(fetch(request).catch(async()=>{ const cached=await caches.match(request); return cached || (request.mode==="navigate" ? (await caches.match(OFFLINE_URL)) : Response.error()); }));
+  } else {
+    event.respondWith(networkFirst(request));
+  }
 });

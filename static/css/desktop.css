@@ -170,3 +170,24 @@ body.app-body .sidebar h3{color:var(--panel-text,var(--primary-text,#111))}
 body.app-body .panel .muted,
 body.app-body .topbar .muted,
 body.app-body .panel .topbar-subtitle{color:var(--muted-text,#6f6f6a)}
+
+/* PC FIX — PUBLIC ABOUT / INSTITUTIONAL STORY TEXT
+   This section sits on white cards. It must remain readable on desktop
+   regardless of the selected landing/theme text color. Phone rules remain
+   untouched in mobile.css. */
+@media (min-width:821px){
+  body.auth-body.landing-body .landing-deep-about-item,
+  body.auth-body.landing-body .landing-deep-about-item .deep-about-copy,
+  body.auth-body.landing-body .landing-deep-about-item .deep-about-body,
+  body.auth-body.landing-body .landing-deep-about-item .copy-inner{
+    color:#111111!important;
+  }
+  body.auth-body.landing-body .landing-deep-about-item .copy-inner,
+  body.auth-body.landing-body .landing-deep-about-item .copy-inner *{
+    color:#111111!important;
+  }
+  body.auth-body.landing-body .landing-about-strip article,
+  body.auth-body.landing-body .landing-about-strip article p{
+    color:#111111!important;
+  }
+}

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "school-system";
-const CACHE_VERSION = "v39";
+const CACHE_VERSION = "v41";
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline";
 const PRIVATE_PREFIXES = ["/admin","/finance-dashboard","/teacher","/student","/parent","/librarian","/driver","/communication","/library","/online-classes","/e-learning","/notifications"];

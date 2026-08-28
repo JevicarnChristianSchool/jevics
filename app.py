@@ -71,7 +71,7 @@ PULSE_ALLOWED_CALLBACK_HOSTS = {h.strip().lower() for h in os.environ.get("PULSE
 ALLOWED_RESTORE_EXT = {"db", "sqlite", "sqlite3"}
 PUBLIC_ROLES = ("Teacher", "Student", "Parent", "Librarian", "Driver")
 HIDDEN_ROLES = ("Admin", "ICT", "Finance")
-QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian"}
+QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian", "Driver"}
 QR_LOGIN_WORKSPACES = {"Teaching", "Driver", "Reception", "Guard", "Cook", "Other Staff"}
 E_LEARNING_ROLES = {"Admin", "ICT", "Teacher", "Student"}
 LIBRARY_ROLES = {"Admin", "ICT", "Librarian", "Teacher", "Student", "Parent"}
@@ -1317,6 +1317,7 @@ def _init_db_once() -> None:
         conn.execute("INSERT OR IGNORE INTO finance_accounts(id, account_name, opening_balance) VALUES(1, 'Institution Operating Account', 0)")
         conn.execute("UPDATE users SET qr_access_token=lower(hex(randomblob(16))) WHERE role!='System' AND (qr_access_token IS NULL OR qr_access_token='')")
         conn.execute("UPDATE users SET qr_login_enabled=0 WHERE qr_login_enabled IS NULL")
+        conn.execute("UPDATE users SET qr_login_enabled=1 WHERE active=1 AND role IN ('Admin','ICT','Finance','Teacher','Librarian','Driver') AND qr_access_token IS NOT NULL AND qr_access_token!=''")
         if conn.execute("SELECT COUNT(*) FROM system_help").fetchone()[0] == 0:
             help_rows=[
                 ('Getting started','Getting Started','Use the navigation to open your workspace. Administrators manage people, institution settings, security, backups and permissions.','All',10),
@@ -2116,8 +2117,11 @@ def record_reception_scan(action, token='', device_token='', full_name='', phone
 
 def specialized_dashboard_for(user) -> str:
     # One account -> one operational destination. Student linkage always wins
-    # over stale legacy role/workspace data.
+    # over stale legacy role/workspace data. Workspace-specific destinations
+    # are resolved before the broad stored role so Reception never falls back
+    # to a Teacher dashboard.
     role=(user.get("role") if hasattr(user, "get") else user["role"]) or ""
+    wt=workspace_type_for_user(user)
     try:
         if user.get("student_id"):
             linked = q("SELECT id FROM students WHERE id=? AND active=1", (user["student_id"],), one=True)
@@ -2125,9 +2129,11 @@ def specialized_dashboard_for(user) -> str:
                 role = "Student"
     except Exception:
         pass
-    if role in {"Admin","ICT","Finance","Teacher","Student","Parent","Librarian"}:
+    if role == "Student":
+        return role_target("Student")
+    if wt == "Reception" and role not in {"Admin", "ICT"}: return url_for("reception_dashboard")
+    if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian"}:
         return role_target(role)
-    wt=workspace_type_for_user(user)
     if wt=="Driver": return url_for("driver_dashboard")
     if wt in {"Guard","Cook","Other Staff"}: return url_for("workforce_dashboard", kind=wt)
     # Unknown/legacy staff is sent to the generic dashboard dispatcher rather
@@ -2266,26 +2272,49 @@ def _rgba(hex_value, alpha):
 
 def theme_style(settings=None) -> str:
     settings = settings or school_settings()
-    def esc(v):
-        return str(v).replace('<','').replace('>','').replace('"','').replace(';','')
-    # Authenticated workspaces use a restrained cool charcoal baseline. The public
-    # landing page owns its own red/cream/green palette and overrides this scope.
-    bg='#202123'; panel='#2b2d31'; panel3='#34363b'; sidebar='#252629'; header='#2b2d31'
-    text='#ececf1'; muted='#a8a8ad'
-    font_family=esc(settings['font_family'] or 'Inter')
-    heading_font=esc(settings['heading_font'] or settings['font_family'] or 'Inter')
+    def clean(v, fallback):
+        value=str(v or '').strip()
+        return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
+    def distinct(bg, requested, fallback):
+        requested=clean(requested, fallback)
+        if _contrast_ratio(bg, requested) >= 1.18:
+            return requested
+        candidates=[clean(fallback, '#ffffff'), '#ffffff', '#101828']
+        return max(dict.fromkeys(candidates), key=lambda c:_contrast_ratio(bg,c))
+    bg=clean(settings['background_color'], '#202123')
+    panel=distinct(bg, settings['panel_color'], '#2b2d31')
+    panel3=distinct(panel, settings['background_color'], '#34363b')
+    sidebar=distinct(bg, settings['sidebar_color'], panel)
+    header=distinct(bg, settings['header_color'], panel)
+    text=_best_text(bg, clean(settings['text_color'], '#ececf1'), 4.5)
+    panel_text=_best_text(panel, clean(settings['text_color'], '#ececf1'), 4.5)
+    sidebar_text=_best_text(sidebar, clean(settings['text_color'], '#ececf1'), 4.5)
+    header_text=_best_text(header, clean(settings['text_color'], '#ececf1'), 4.5)
+    muted=_best_text(bg, clean(settings['muted_text_color'], '#a8a8ad'), 3.0)
+    input_text=_best_text(panel3, text, 4.5)
+    primary=distinct(bg, settings['primary_color'], '#3457d5')
+    accent=distinct(bg, settings['accent_color'], '#2457d6')
+    font_family=str(settings['font_family'] or 'Inter').replace('<','').replace('>','').replace(';','').replace('"','')
+    heading_font=str(settings['heading_font'] or settings['font_family'] or 'Inter').replace('<','').replace('>','').replace(';','').replace('"','')
+    radius=max(4,min(28,int(settings['radius_px'] or 12)))
+    button_radius=max(4,min(28,int(settings['button_radius_px'] or 10)))
     bg_path=str(settings.get('background_path','') or '').strip() if hasattr(settings,'get') else ''
-    bg_image=f"body.app-body{{background-image:linear-gradient(180deg,rgba(17,18,20,.72),rgba(17,18,20,.84)),url('/{bg_path}');background-size:cover;background-position:center;background-attachment:fixed;}}" if bg_path else ''
-    css=(f"body.app-body{{--bg:{bg};--bg-soft:#1b1c1e;--panel:{panel};--panel-2:#25272b;--panel-3:{panel3};"
-         f"--primary-navy:{text};--primary-blue:#8f929a;--deep-accent-blue:#a6a8ae;--cool-pale-blue:#2f3136;--soft-white:#f7f7f8;--white:#fff;"
-         f"--primary-text:{text};--muted-text:{muted};--panel-text:{text};--sidebar-text:{text};--header-text:{text};"
-         f"--text-soft:rgba(255,255,255,.05);--text-border:rgba(255,255,255,.12);--text-hover:rgba(255,255,255,.08);"
-         f"--input-text:#f1f1f3;--primary-button-text:#f7f7f8;--sidebar-bg:{sidebar};--header-bg:{header};"
-         f"--font:'{font_family}',Inter,system-ui,sans-serif;--heading-font:'{heading_font}',{font_family},Inter,sans-serif;}}" )
-    extra=settings['custom_css'] or ''
-    if len(extra)>12000 or re.search(r'@import|javascript:|expression\s*\(', extra, re.I):
-        extra=''
-    return css+bg_image+extra
+    bg_image=f"body.app-body{{background-image:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.38)),url('/{bg_path}');background-size:cover;background-position:center;background-attachment:fixed;}}" if bg_path else ''
+    css=(f"body.app-body,body.auth-body:not(.landing-body){{--bg:{bg};--bg-soft:{distinct(bg, bg, '#1b1c1e')};--panel:{panel};--panel-2:{distinct(panel,bg,'#25272b')};--panel-3:{panel3};"
+         f"--primary-navy:{text};--primary-blue:{primary};--deep-accent-blue:{accent};--cool-pale-blue:{distinct(bg,accent,'#dbe7ff')};--soft-white:#f7f7f8;--white:#fff;"
+         f"--primary-text:{text};--muted-text:{muted};--panel-text:{panel_text};--sidebar-text:{sidebar_text};--header-text:{header_text};"
+         f"--text-soft:{_rgba(panel_text,.06)};--text-border:{_rgba(panel_text,.16)};--text-hover:{_rgba(panel_text,.10)};"
+         f"--input-text:{input_text};--primary-button-text:{_best_text(primary,panel_text,4.5)};--sidebar-bg:{sidebar};--header-bg:{header};"
+         f"--font:'{font_family}',Inter,system-ui,sans-serif;--heading-font:'{heading_font}',{font_family},Inter,sans-serif;--radius:{radius}px;--button-radius:{button_radius}px;}}" )
+    extra=str(settings['custom_css'] or '')
+    if len(extra)>12000 or re.search(r'@import|javascript:|expression\s*\(', extra, re.I): extra=''
+    # Hard guarantee against white-on-white (or dark-on-dark) content in common containers.
+    safety=(f"body.app-body .panel,body.app-body .topbar,body.app-body .sidebar,body.app-body .modal-card,body.auth-body:not(.landing-body) .auth-card,body.auth-body:not(.landing-body) .info-card{{color:var(--panel-text);}}"
+            f"body.app-body .panel h1,body.app-body .panel h2,body.app-body .panel h3,body.app-body .panel h4,body.app-body .topbar h1,body.app-body .topbar h2,body.app-body .sidebar h1,body.app-body .sidebar h2,body.auth-body:not(.landing-body) .info-card h2{{color:var(--panel-text);}}"
+            f"body.app-body .panel p,body.app-body .panel td,body.app-body .panel th,body.auth-body:not(.landing-body) .info-card p{{color:var(--panel-text);}}"
+            f"body.app-body a{{color:var(--primary-blue);}}body.app-body .muted{{color:var(--muted-text);}}"
+            f"body.app-body input,body.app-body select,body.app-body textarea{{color:var(--input-text);background:var(--panel-3);}}" )
+    return css+bg_image+safety+extra
 
 def theme_preset_style(settings=None) -> str:
     settings=settings or school_settings()
@@ -2305,13 +2334,21 @@ def active_advertisements(limit=4):
 
 def landing_style(settings=None) -> str:
     settings=settings or school_settings()
+    def clean(v, fallback):
+        value=str(v or '').strip()
+        return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
     ff=str(settings['landing_font_family'] or 'Inter').replace('<','').replace('>','').replace(';','').replace('"','')
     hf=str(settings['landing_heading_font'] or ff).replace('<','').replace('>','').replace(';','').replace('"','')
     width=max(900,min(1600,int(settings['landing_content_width'] or 1240)))
     cols=max(1,min(3,int(settings['landing_role_columns'] or 3)))
     hero=str(settings['landing_hero_layout'] or 'split')
     hero_css='grid-template-columns:minmax(0,1.55fr) minmax(260px,.65fr);' if hero=='split' else 'grid-template-columns:1fr;'
-    return f".landing-shell{{width:min({width}px,calc(100% - 48px));}} .landing-hero{{{hero_css}}} .role-grid{{grid-template-columns:repeat({cols},minmax(0,1fr));}} .landing-font-scope{{font-family:'{ff}',Inter,system-ui,sans-serif;}} .landing-heading-scope{{font-family:'{hf}',{ff},Inter,system-ui,sans-serif;}}"
+    bg=clean(settings['landing_background_color'] if 'landing_background_color' in settings.keys() else '#f5efe1', '#f5efe1')
+    panel=clean(settings['landing_panel_color'] if 'landing_panel_color' in settings.keys() else '#ffffff', '#ffffff')
+    text=_best_text(bg, clean(settings['landing_text_color'] if 'landing_text_color' in settings.keys() else '#17231d', '#17231d'), 4.5)
+    panel_text=_best_text(panel, text, 4.5)
+    accent=clean(settings['landing_accent_color'] if 'landing_accent_color' in settings.keys() else '#2457d6', '#2457d6')
+    return f".landing-shell{{width:min({width}px,calc(100% - 48px));}} .landing-hero{{{hero_css}}} .role-grid{{grid-template-columns:repeat({cols},minmax(0,1fr));}} .landing-font-scope{{font-family:'{ff}',Inter,system-ui,sans-serif;--landing-bg:{bg};--landing-panel:{panel};--landing-text:{text};--landing-panel-text:{panel_text};--landing-accent:{accent};}} .landing-heading-scope{{font-family:'{hf}',{ff},Inter,system-ui,sans-serif;}} .landing-body{{background-color:var(--landing-bg);color:var(--landing-text);}} .landing-body .landing-card,.landing-body .date-card,.landing-body .portal-entry-card,.landing-body .landing-deep-about-item{{color:var(--landing-panel-text);background:var(--landing-panel);}} .landing-body a{{color:{accent};}}"
 
 
 def current_landing_url() -> str:
@@ -3650,7 +3687,7 @@ def reception_register_staff():
     name=request.form.get('full_name','').strip(); username=request.form.get('username','').strip().lower(); password=request.form.get('password','').strip()
     if not name or not username or len(password)<4: flash('Staff name, username and a temporary password are required.','danger'); return redirect(url_for('reception_dashboard'))
     if q("SELECT id FROM users WHERE lower(username)=?",(username,),one=True): flash('That username is already in use.','danger'); return redirect(url_for('reception_dashboard'))
-    code=staff_code_for(role,workspace); unit=request.form.get('school_unit','').strip() or school_settings()['school_name']; loc=request.form.get('school_location','').strip(); uid=execute("INSERT INTO users(full_name,username,password_hash,role,active,title,department,phone,gender,workspace_type,school_unit,school_location,reception_enabled,position_code,staff_code) VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)",(name,username,generate_password_hash(password),role,request.form.get('title','').strip(),request.form.get('department','').strip(),request.form.get('phone','').strip(),request.form.get('gender','').strip(),workspace,unit,loc,1 if workspace=='Reception' else 0,code,code)); execute("UPDATE users SET qr_access_token=? WHERE id=?",(uuid.uuid4().hex,uid)); audit(actor['id'],actor['full_name'],'Reception staff registration',f'{name} registered with staff code {code}.'); flash(f'{name} registered. Staff code: {code}.','success'); return redirect(url_for('reception_dashboard'))
+    code=staff_code_for(role,workspace); unit=request.form.get('school_unit','').strip() or school_settings()['school_name']; loc=request.form.get('school_location','').strip(); uid=execute("INSERT INTO users(full_name,username,password_hash,role,active,title,department,phone,gender,workspace_type,school_unit,school_location,reception_enabled,position_code,staff_code) VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)",(name,username,generate_password_hash(password),role,request.form.get('title','').strip(),request.form.get('department','').strip(),request.form.get('phone','').strip(),request.form.get('gender','').strip(),workspace,unit,loc,1 if workspace=='Reception' else 0,code,code)); execute("UPDATE users SET qr_access_token=?, qr_login_enabled=1 WHERE id=?",(uuid.uuid4().hex,uid)); audit(actor['id'],actor['full_name'],'Reception staff registration',f'{name} registered with staff code {code}.'); flash(f'{name} registered. Staff code: {code}.','success'); return redirect(url_for('reception_dashboard'))
 
 @app.route("/reception/face/enrol",methods=["POST"])
 @login_required
@@ -6627,7 +6664,7 @@ def add_user():
         position_code=staff_code_for(role, workspace_type) if role not in {"Student","Parent","System"} else ""
         reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
         uid=execute("""INSERT INTO users(full_name, username, password_hash, role, student_id, active, title, department, phone, email, date_of_birth, gender, id_reference, address, emergency_contact, blood_group, medical_notes, accountability_notes, workspace_type, school_unit, school_location, reception_enabled, position_code, staff_code, qr_access_token, qr_login_enabled)
-                      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 0)""",
+                      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 1)""",
                    (full_name,username,generate_password_hash(password),role,student_id,title,department,request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,school_unit,school_location,reception_enabled,position_code,position_code))
         if leadership_role and role not in {"Student","Parent","System"}:
             execute("UPDATE users SET leadership_role=?,leadership_level=? WHERE id=?",(leadership_role,1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0,uid))

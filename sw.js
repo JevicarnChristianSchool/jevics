@@ -1,8 +1,8 @@
 const CACHE_PREFIX = "school-system";
-const CACHE_VERSION = "v39";
+const CACHE_VERSION = "v42-pc-mobile-split";
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline";
-const SHELL = ["/","/login","/static/css/style.css","/static/js/app.js","/static/manifest.json","/static/icons/icon-192.png","/static/icons/icon-512.png","/favicon.ico",OFFLINE_URL];
+const SHELL = ["/","/login","/static/css/style.css","/static/css/desktop.css","/static/css/mobile.css","/static/js/app.js","/static/manifest.json","/static/icons/icon-192.png","/static/icons/icon-512.png","/favicon.ico",OFFLINE_URL];
 self.addEventListener("install", event => { event.waitUntil((async()=>{ const cache=await caches.open(CACHE_NAME); await Promise.all(SHELL.map(async url=>{try{await cache.add(url);}catch(_){}})); await self.skipWaiting(); })()); });
 self.addEventListener("activate", event => { event.waitUntil((async()=>{ const keys=await caches.keys(); await Promise.all(keys.filter(k=>k.startsWith(`${CACHE_PREFIX}-`)&&k!==CACHE_NAME).map(k=>caches.delete(k))); await self.clients.claim(); })()); });
 async function networkFirst(request){ const cache=await caches.open(CACHE_NAME); try{ const response=await fetch(request); if(response&&response.ok&&new URL(request.url).origin===self.location.origin){ await cache.put(request,response.clone()); } return response; } catch(_){ const cached=await cache.match(request); if(cached)return cached; if(request.mode==="navigate") { const cachedExact=await cache.match(request); if(cachedExact)return cachedExact; return (await cache.match(OFFLINE_URL)) || (await cache.match("/login")) || Response.error(); } return Response.error(); } }

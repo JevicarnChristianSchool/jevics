@@ -1,0 +1,172 @@
+/* Prime Institution OS — DESKTOP / PC layer
+   Loaded ONLY for viewports 821px and wider.
+   Phone styling is isolated in mobile.css; do not put max-width rules here. */
+
+html{min-width:821px}
+body.app-body{
+  grid-template-columns:292px minmax(0,1fr);
+  gap:0;
+  min-width:821px;
+  font-size:15px;
+  overflow-x:hidden;
+}
+body.app-body.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)}
+
+/* Give the desktop canvas room to breathe. */
+body.app-body .content{
+  width:100%;
+  max-width:none;
+  padding:22px 26px 34px;
+  gap:18px;
+}
+body.app-body .content.single{
+  width:min(1400px,100%);
+  max-width:1400px!important;
+  margin:0 auto;
+  padding:24px 30px 36px;
+}
+
+/* Desktop sidebar is a proper application rail, independent from the phone drawer. */
+body.app-body .sidebar{
+  position:sticky;
+  top:0;
+  width:292px;
+  height:100dvh;
+  padding:22px 18px;
+  border-radius:0 18px 18px 0;
+  transform:none!important;
+  opacity:1!important;
+  pointer-events:auto!important;
+  overflow-y:auto;
+}
+body.app-body.sidebar-style-top .sidebar,
+body.app-body.sidebar-style-hover .sidebar{width:auto}
+
+body.app-body .sidebar-title h2{font-size:21px;line-height:1.15}
+body.app-body .brand-name{font-size:16px}
+body.app-body .brand-subtitle{font-size:13px;line-height:1.4}
+body.app-body .nav-group-toggle{font-size:14px;min-height:46px}
+body.app-body .nav-link{font-size:14px;line-height:1.35;min-height:42px;display:flex;align-items:center}
+body.app-body .sidebar-foot{font-size:13px;line-height:1.5}
+
+/* Desktop top bar and headings. */
+body.app-body .topbar{
+  min-height:96px;
+  padding:22px 24px;
+  border-radius:16px;
+  align-items:center;
+}
+body.app-body .topbar h1{font-size:32px;line-height:1.08;letter-spacing:-.035em}
+body.app-body .topbar-subtitle{font-size:14px;line-height:1.55}
+body.app-body .eyebrow{font-size:11px}
+body.app-body .panel{
+  padding:24px;
+  border-radius:16px;
+}
+body.app-body .panel h1{font-size:30px;line-height:1.12}
+body.app-body .panel h2{font-size:24px;line-height:1.18}
+body.app-body .panel h3{font-size:21px;line-height:1.2}
+body.app-body .panel p,
+body.app-body .panel td,
+body.app-body .panel th{line-height:1.5}
+
+/* Make text and controls readable on a normal PC screen. */
+body.app-body label span{font-size:12px}
+body.app-body input,
+body.app-body select,
+body.app-body textarea{font-size:14px;min-height:46px}
+body.app-body textarea{min-height:120px}
+body.app-body .btn{min-height:44px;font-size:14px}
+body.app-body .btn.mini{min-height:38px}
+
+/* Desktop grids. */
+body.app-body .stats-grid,
+body.app-body .summary-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+body.app-body .detail-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+body.app-body .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+body.app-body .feature-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+body.app-body .role-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+body.app-body .candidate-grid,
+body.app-body .resource-grid,
+body.app-body .institution-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+
+body.app-body .mini-card,
+body.app-body .detail-card{padding:17px;min-height:100px}
+body.app-body .mini-card span,
+body.app-body .detail-card h4{font-size:11px}
+body.app-body .mini-card strong{font-size:18px}
+
+/* Tables are desktop tables. Keep horizontal scrolling as a last-resort fallback. */
+body.app-body .table-wrap{width:100%;overflow:auto}
+body.app-body table{min-width:0;width:100%}
+body.app-body th,
+body.app-body td{padding:13px 14px;font-size:14px;vertical-align:middle}
+body.app-body thead th{font-size:11px}
+
+/* About / Institution content: explicit desktop text colors and scale so it cannot disappear behind theme layers. */
+body.auth-body:not(.landing-body) .institution-readonly,
+body.auth-body:not(.landing-body) .institution-readonly h1,
+body.auth-body:not(.landing-body) .institution-readonly h2,
+body.auth-body:not(.landing-body) .institution-readonly h3,
+body.auth-body:not(.landing-body) .institution-readonly p,
+body.auth-body:not(.landing-body) .institution-readonly .info-card,
+body.auth-body:not(.landing-body) .institution-readonly .info-card p{
+  color:var(--primary-text,#111)!important;
+}
+body.auth-body:not(.landing-body) .institution-readonly{
+  width:min(1400px,calc(100% - 64px));
+  max-width:1400px;
+  margin:0 auto;
+  padding:30px 0 50px;
+}
+body.auth-body:not(.landing-body) .institution-readonly .info-card p{
+  font-size:17px;
+  line-height:1.75;
+}
+body.auth-body:not(.landing-body) .institution-readonly .public-nav{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:18px 0 24px;
+}
+body.auth-body:not(.landing-body) .institution-readonly .public-nav a{
+  color:var(--primary-text,#111)!important;
+}
+
+/* Public About writer / dashboards with a single full-width main should use the whole PC canvas. */
+body.app-body > .content:only-child{grid-column:1/-1}
+body.app-body > .content:only-child .topbar,
+body.app-body > .content:only-child .panel{width:100%}
+
+/* Desktop role workspaces. */
+body.app-body .driver .driver-grid{grid-template-columns:minmax(0,1.55fr) minmax(320px,.45fr);gap:20px}
+body.app-body .wf .big{width:auto}
+body.app-body .people-hero{grid-template-columns:minmax(0,1.4fr) minmax(340px,.6fr)}
+body.app-body .people-filters{grid-template-columns:repeat(4,minmax(0,1fr))}
+
+/* Keep mobile-only controls out of the PC experience. */
+body.app-body .prime-mobile-nav,
+body.app-body .landing-mobile-nav,
+body.auth-body .landing-mobile-nav{display:none!important}
+body.app-body .sidebar-backdrop{display:none!important}
+
+/* Desktop notification and utility controls. */
+body.app-body .notification-bell{top:18px;right:22px;width:46px;height:46px}
+
+/* Strong desktop text visibility guard for dynamically themed pages. */
+body.app-body .panel,
+body.app-body .topbar,
+body.app-body .sidebar{color:var(--panel-text,var(--primary-text,#111))}
+body.app-body .panel h1,
+body.app-body .panel h2,
+body.app-body .panel h3,
+body.app-body .panel h4,
+body.app-body .topbar h1,
+body.app-body .topbar h2,
+body.app-body .topbar h3,
+body.app-body .sidebar h1,
+body.app-body .sidebar h2,
+body.app-body .sidebar h3{color:var(--panel-text,var(--primary-text,#111))}
+body.app-body .panel .muted,
+body.app-body .topbar .muted,
+body.app-body .panel .topbar-subtitle{color:var(--muted-text,#6f6f6a)}

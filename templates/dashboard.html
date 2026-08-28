@@ -8,7 +8,7 @@
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="{{ theme_color }}">
   <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"><link rel="stylesheet" media="(min-width: 821px)" href="{{url_for('static',filename='css/desktop.css')}}"><link rel="stylesheet" media="(max-width: 820px)" href="{{url_for('static',filename='css/mobile.css')}}">
 <style>{{theme_style|safe}}{{theme_preset_style|safe}}</style></head>
 <body class="app-body sidebar-style-{{ school_settings.sidebar_style|default("drawer", true) }}">{% include "_notification_bell.html" %}
   <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{school_settings.school_name}} | Parent Dashboard</title><link rel="manifest" href="{{url_for('static',filename='manifest.json')}}"><link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}"><style>{{theme_style|safe}}{{theme_preset_style|safe}}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{school_settings.school_name}} | Parent Dashboard</title><link rel="manifest" href="{{url_for('static',filename='manifest.json')}}"><link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}"><link rel="stylesheet" media="(min-width: 821px)" href="{{url_for('static',filename='css/desktop.css')}}"><link rel="stylesheet" media="(max-width: 820px)" href="{{url_for('static',filename='css/mobile.css')}}"><style>{{theme_style|safe}}{{theme_preset_style|safe}}
 .role-parent .parent-overview-stats{grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch}
 .role-parent .parent-overview-stats .mini-card{min-height:92px;align-content:start}
 .role-parent .parent-overview-stats .mini-card strong{line-height:1.25;overflow-wrap:anywhere}

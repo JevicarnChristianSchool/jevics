@@ -12,6 +12,7 @@ import sqlite3
 import uuid
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -527,6 +528,29 @@ def _init_db_once() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE SET NULL
             );
+
+            CREATE TABLE IF NOT EXISTS system_errors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                level TEXT NOT NULL DEFAULT 'ERROR',
+                source TEXT NOT NULL DEFAULT 'server',
+                method TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '',
+                endpoint TEXT NOT NULL DEFAULT '',
+                status_code INTEGER NOT NULL DEFAULT 500,
+                user_id INTEGER,
+                username TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT '',
+                message TEXT NOT NULL DEFAULT '',
+                exception_type TEXT NOT NULL DEFAULT '',
+                traceback TEXT NOT NULL DEFAULT '',
+                user_agent TEXT NOT NULL DEFAULT '',
+                request_id TEXT NOT NULL DEFAULT '',
+                client_context TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_system_errors_created_at ON system_errors(created_at);
+            CREATE INDEX IF NOT EXISTS idx_system_errors_status ON system_errors(status_code,created_at);
 
             CREATE TABLE IF NOT EXISTS login_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
@@ -1627,6 +1651,10 @@ def safe_q(sql: str, params: Iterable[Any] = (), one: bool = False, default=None
         return value or (default if default is not None else [])
     except Exception as exc:
         app.logger.exception("Non-fatal portal read failure: %s", exc)
+        try:
+            record_system_error(source='server', message='Non-fatal portal database read failure', error=exc, status_code=500, client_context=sql[:4000])
+        except Exception:
+            pass
         return default if default is not None else (None if one else [])
 
 
@@ -1742,6 +1770,40 @@ def audit(actor_id: int | None, actor_name: str, action: str, details: str) -> N
         "INSERT INTO audit_log(actor_id, actor_name, action, details) VALUES (?, ?, ?, ?)",
         (actor_id, actor_name, action, details),
     )
+
+
+def record_system_error(source='server', message='', error=None, status_code=500, level='ERROR', request_id=None, client_context=''):
+    """Best-effort persistent diagnostics. Never raise while handling another error."""
+    try:
+        user=getattr(g,'user',None)
+        tb=''
+        et=''
+        if error is not None:
+            et=type(error).__name__
+            tb=''.join(traceback.format_exception(type(error),error,error.__traceback__))[:30000]
+        ua=(request.headers.get('User-Agent') or '')[:1000]
+        rid=(request_id or request.headers.get('X-Request-ID') or uuid.uuid4().hex)[:120]
+        username=(user['username'] if user else '') or ''
+        role=(user['role'] if user else '') or ''
+        uid=user['id'] if user else None
+        execute("""INSERT INTO system_errors(created_at,level,source,method,path,endpoint,status_code,user_id,username,role,message,exception_type,traceback,user_agent,request_id,client_context)
+                   VALUES(datetime('now','+3 hours'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (str(level or 'ERROR')[:20],str(source or 'server')[:40],request.method,str(request.path)[:500],str(request.endpoint or '')[:200],int(status_code or 0),uid,username[:200],role[:80],str(message or '')[:5000],et,tb,ua,rid,str(client_context or '')[:15000]))
+        return rid
+    except Exception as log_exc:
+        try:
+            app.logger.exception("Persistent system error logging failed: %s", log_exc)
+        except Exception:
+            pass
+        # Last-resort append-only file. This also survives a temporarily locked SQLite DB.
+        try:
+            DATA_DIR.mkdir(parents=True,exist_ok=True)
+            fallback=DATA_DIR/'system-errors.jsonl'
+            payload={'created_at':datetime.utcnow().isoformat(timespec='seconds')+'Z','level':level,'source':source,'path':getattr(request,'path',''),'method':getattr(request,'method',''),'status_code':status_code,'message':message,'exception_type':type(error).__name__ if error else '','traceback':tb,'request_id':request_id or uuid.uuid4().hex,'user_agent':(request.headers.get('User-Agent') or '')[:1000],'client_context':client_context}
+            with fallback.open('a',encoding='utf-8') as fh: fh.write(json.dumps(payload,ensure_ascii=False)+'\n')
+        except Exception:
+            pass
+        return request_id
 
 
 def record_login_event(user, method='Password', latitude=None, longitude=None, accuracy=None):
@@ -1879,6 +1941,23 @@ def load_current_user() -> None:
             session["user_id"] = recovered["id"]
             g.portal_context = None
 
+
+def _client_error_logger_script():
+    return r'''<script>(function(){
+  if(window.__primeErrorLogger)return; window.__primeErrorLogger=1;
+  var KEY='prime_local_errors_v1', PATH='/api/system-errors/client';
+  function read(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return []}}
+  function save(o){try{var a=read();a.push(o);if(a.length>200)a=a.slice(-200);localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
+  function send(o){o.request_id=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():String(Date.now())+'-'+Math.random();try{if(navigator.sendBeacon){var b=new Blob([JSON.stringify(o)],{type:'application/json'});if(navigator.sendBeacon(PATH,b))return}}catch(e){}try{fetch(PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),keepalive:true}).then(function(r){if(!r.ok)save(o)}).catch(function(){save(o)})}catch(e){save(o)}}
+  function log(level,message,stack,status){send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
+  window.addEventListener('error',function(e){log('ERROR',e.message||'JavaScript error',e.error&&e.error.stack||'',0)});
+  window.addEventListener('unhandledrejection',function(e){var r=e.reason;log('ERROR',r&&r.message||String(r||'Unhandled promise rejection'),r&&r.stack||'',0)});
+  var oldFetch=window.fetch.bind(window);
+  window.fetch=function(){var a=arguments,target=String(a[0]&&a[0].url||a[0]||'');return oldFetch.apply(window,a).then(function(r){if(!r.ok&&target.indexOf(PATH)<0)log(r.status>=500?'ERROR':'WARN','HTTP '+r.status+' returned for '+target,'',r.status);return r}).catch(function(e){if(target.indexOf(PATH)<0)log('ERROR','Fetch failed: '+(e&&e.message||e),e&&e.stack||'',0);throw e})};
+  function flush(){var a=read();if(!a.length||!navigator.onLine)return;localStorage.removeItem(KEY);a.slice(0,40).forEach(function(o){try{send(o)}catch(e){save(o)}})}
+  window.addEventListener('online',flush); setTimeout(flush,500);
+  window.addEventListener('beforeunload',function(){read().slice(0,20).forEach(function(o){try{navigator.sendBeacon(PATH,new Blob([JSON.stringify(o)],{type:'application/json'}))}catch(e){}})});
+})();</script>'''
 @app.after_request
 def persist_auth_cookie(response):
     user = getattr(g, "user", None)
@@ -1886,7 +1965,12 @@ def persist_auth_cookie(response):
         # Keep a durable server-backed identity ticket independent of Flask
         # session mutations performed by unrelated Admin operations.
         ticket = request.cookies.get(_AUTH_TICKET_COOKIE, "")
-        if not _user_from_auth_ticket(ticket):
+        ticket_user = _user_from_auth_ticket(ticket) if ticket else None
+        if getattr(g, "portal_context", None) and flask_session.get("admin_impersonation"):
+            root_id=flask_session.get("user_id")
+            if root_id and (not ticket_user or ticket_user["id"] != root_id):
+                ticket = _issue_auth_ticket(root_id)
+        elif not ticket_user:
             ticket = _issue_auth_ticket(user["id"])
         response.set_cookie(_AUTH_TICKET_COOKIE, ticket, max_age=_AUTH_COOKIE_MAX_AGE, httponly=True, secure=app.config.get("SESSION_COOKIE_SECURE", False), samesite="Lax", path="/")
         # Do not replace the administrator's persistent auth cookie while a
@@ -1924,7 +2008,7 @@ def persist_auth_cookie(response):
             body=response.get_data(as_text=True)
             if 'id="prime-global-tools"' not in body and "</body>" in body:
                 shell="""<button id="prime-mobile-nav" class="prime-mobile-nav" type="button" aria-label="Open navigation" aria-expanded="false" title="Open navigation"><span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span></button><div id="prime-mobile-menu" class="prime-mobile-menu"><a href="/dashboard">Dashboard</a><a href="/calendar">School calendar</a><a href="/notifications">Notifications</a><a href="/system-help">System help</a><a href="/logout">Logout</a></div><div id="prime-global-tools" class="prime-global-tools"><a class="prime-search-link" href="/system-search" aria-label="Search system" title="Search system"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg></a><a class="prime-bell" href="/notifications" aria-label="Notifications" title="Notifications"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><b id="prime-notification-count" class="prime-count hidden"></b></a><button type="button" class="prime-shortcuts-btn" aria-label="Open shortcuts" onclick="document.getElementById('prime-shortcuts').classList.toggle('open')">☰</button><div id="prime-shortcuts" class="prime-shortcuts"><strong>Quick access</strong><a href="/calendar">Calendar</a><a href="/notifications">Notifications</a><a href="/online-classes">Live classes</a><a href="/groups">Groups</a><a href="/leadership">Leadership</a></div></div><button id="prime-mobile-text" class="prime-mobile-text" type="button" aria-label="Adjust text size" title="Adjust text size">Aa</button><div id="prime-text-sheet" class="prime-text-sheet" role="dialog" aria-modal="true" aria-label="Text size settings"><div class="prime-text-sheet-card"><div><strong>Text size</strong><span class="muted">Adjust this device only.</span></div><div class="prime-text-choices"><button type="button" data-prime-text="normal">Normal</button><button type="button" data-prime-text="large">Large</button><button type="button" data-prime-text="xlarge">Extra large</button></div><button type="button" class="btn btn-ghost btn-block" id="prime-text-close">Done</button></div></div><style>.prime-global-tools{position:fixed;right:18px;top:16px;z-index:5000;display:flex;gap:8px;align-items:flex-start;font-family:system-ui,sans-serif}.prime-search-link,.prime-bell,.prime-shortcuts-btn{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;text-decoration:none;border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 35%,transparent);background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 8px 30px rgba(0,0,0,.18);cursor:pointer}.prime-search-link,.prime-bell{font-size:18px}.prime-bell span{color:inherit;font-size:18px;line-height:1}.prime-count{position:absolute;right:45px;top:-3px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#dc143c;color:#fff;font:700 10px/17px system-ui;text-align:center}.prime-count.dot{width:8px;min-width:8px;height:8px;padding:0;line-height:8px;right:47px}.prime-count.hidden{display:none}.prime-shortcuts{display:none;position:absolute;right:0;top:48px;min-width:190px;padding:10px;border-radius:14px;background:var(--panel,#fff);border:1px solid color-mix(in srgb,var(--primary-blue,#3457d5) 20%,transparent);box-shadow:0 18px 40px rgba(0,0,0,.22)}.prime-shortcuts.open{display:grid;gap:5px}.prime-shortcuts strong{padding:5px 8px}.prime-shortcuts a{padding:8px 10px;border-radius:9px;color:inherit;text-decoration:none}.prime-shortcuts a:hover{background:rgba(127,127,127,.12)}.prime-mobile-nav{display:none}.prime-mobile-nav.open{display:grid}.prime-mobile-text,.prime-text-sheet{display:none}body.auth-body .prime-global-tools,body.auth-body .prime-mobile-nav,body.auth-body .prime-mobile-menu,body.auth-body .prime-mobile-text{display:none}@media(max-width:820px){.prime-shortcuts-btn{display:none!important}.prime-mobile-nav{display:grid;place-items:center;position:fixed;left:12px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:22px;cursor:pointer;z-index:5001}.prime-global-tools{right:12px;top:12px}.prime-mobile-text{display:grid;place-items:center;position:fixed;right:64px;top:12px;width:46px;height:46px;border-radius:12px;border:1px solid var(--text-border,var(--border));background:var(--panel,#fff);color:var(--primary-text,#152033);box-shadow:0 10px 28px rgba(0,0,0,.20);font-size:15px;font-weight:900;cursor:pointer;z-index:5001}.prime-text-sheet{position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:6000;align-items:flex-end;justify-content:center;padding:14px}.prime-text-sheet.open{display:flex}.prime-text-sheet-card{width:min(460px,100%);border:1px solid var(--text-border,var(--border));border-radius:20px 20px 14px 14px;background:var(--panel);box-shadow:0 -18px 50px rgba(0,0,0,.26);padding:18px;display:grid;gap:16px}.prime-text-sheet-card>div:first-child{display:grid;gap:4px}.prime-text-choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.prime-text-choices button{border:1px solid var(--text-border,var(--border));background:var(--panel-3);color:var(--primary-text);border-radius:12px;padding:12px 8px;font-weight:800;cursor:pointer}.prime-text-choices button.active{border-color:var(--primary-blue);box-shadow:0 0 0 3px rgba(16,163,127,.14)}}</style><script>(function(){var m=document.getElementById('prime-mobile-nav');if(m){if(document.getElementById('sidebarToggle')){m.remove();}else{m.addEventListener('click',function(e){e.stopPropagation();var hasSidebar=!!document.querySelector('.sidebar');document.body.classList.toggle(hasSidebar?'mobile-nav-open':'prime-smart-menu-open');});document.addEventListener('click',function(e){if(!m.contains(e.target)){document.body.classList.remove('mobile-nav-open','prime-smart-menu-open');}});}}var tb=document.getElementById('prime-mobile-text'),sheet=document.getElementById('prime-text-sheet'),close=document.getElementById('prime-text-close'),choices=document.querySelectorAll('[data-prime-text]');var saved=localStorage.getItem('prime_text_size')||'large';if(saved==='normal'||saved==='large'||saved==='xlarge')document.documentElement.dataset.primeText=saved;if(tb&&sheet){tb.addEventListener('click',function(){sheet.classList.add('open');});sheet.addEventListener('click',function(e){if(e.target===sheet)sheet.classList.remove('open');});close&&close.addEventListener('click',function(){sheet.classList.remove('open');});choices.forEach(function(b){b.classList.toggle('active',b.dataset.primeText===saved);b.addEventListener('click',function(){saved=b.dataset.primeText;localStorage.setItem('prime_text_size',saved);document.documentElement.dataset.primeText=saved;choices.forEach(function(x){x.classList.toggle('active',x.dataset.primeText===saved);});});});}fetch('/api/notifications').then(r=>r.json()).then(d=>{var n=document.getElementById('prime-notification-count');if(!n)return;var c=Number(d.count||0);if(c<=0){n.classList.add('hidden');return;}n.classList.remove('hidden');if(c>5){n.textContent='';n.classList.add('dot');}else{n.textContent=String(c);n.classList.remove('dot');}}).catch(function(){});})();</script>"""
-                response.set_data(body.replace("</body>",shell+"</body>",1))
+                response.set_data(body.replace("</body>", shell + _client_error_logger_script() + "</body>", 1))
         except Exception:
             pass
     response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(self), display-capture=(self)")
@@ -2583,6 +2667,10 @@ def can_access_student(student_id: int, *, write: bool=False) -> bool:
     role=user["role"]
     if role in {"Admin", "ICT", "Finance", "Librarian"}:
         return not write or role in {"Admin", "ICT"}
+    if role == "Teacher":
+        direct=bool(q("SELECT 1 FROM student_teacher_assignments WHERE student_id=? AND teacher_user_id=? AND active=1 LIMIT 1", (student_id,user["id"]), one=True))
+        class_teacher=bool(q("SELECT 1 FROM class_teacher_assignments c JOIN students s ON s.grade=c.class_name WHERE c.teacher_user_id=? AND s.id=? AND s.active=1 LIMIT 1", (user["id"],student_id), one=True))
+        return direct or class_teacher
     if role == "Student":
         return bool(user["student_id"] == student_id and not write)
     if role == "Parent":
@@ -3590,7 +3678,10 @@ def teacher_roster():
 def performance_view():
     user=current_user(); leadership=(user['leadership_role'] or '').lower()
     if user['role'] not in {'Admin','ICT','Teacher'} and leadership not in {'dean','hod','deputy','deputy principal','deputy head','principal'}: abort(403)
-    classes=sorted({r['grade'] for r in q("SELECT DISTINCT grade FROM students WHERE active=1")})
+    if user['role']=='Teacher' and not (user['leadership_role'] or '').lower() in {'dean','hod','deputy','deputy principal','deputy head','principal'}:
+        classes=sorted(set([r['class_name'] for r in q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=?",(user['id'],))] + [r['class_name'] for r in q("SELECT class_name FROM teacher_assignments WHERE teacher_user_id=? AND active=1",(user['id'],))]))
+    else:
+        classes=sorted({r['grade'] for r in q("SELECT DISTINCT grade FROM students WHERE active=1")})
     selected=request.args.get('class_name','').strip() or (classes[0] if classes else '')
     selected_subject=request.args.get('subject','').strip()
     senior = user['role'] in {'Admin','ICT'} or leadership in {'dean','hod','deputy','deputy principal','deputy head','principal'}
@@ -3608,7 +3699,11 @@ def performance_view():
     subjects=q("SELECT DISTINCT subject FROM markbook_entries WHERE class_name=? ORDER BY subject",(selected,)) if selected else []
     if user['role']=='Teacher' and not senior and selected not in assigned_classes:
         subjects=[{'subject':x['subject']} for x in q("SELECT DISTINCT subject FROM teacher_assignments WHERE teacher_user_id=? AND class_name=? AND active=1 ORDER BY subject",(user['id'],selected))]
-    rows=markbook_class_summary(selected,selected_subject) if selected else []
+    allowed_ids=None
+    if user['role']=='Teacher' and not senior and selected:
+        allowed_rows=q("SELECT DISTINCT s.id FROM students s LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1 LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=? WHERE s.active=1 AND s.grade=? AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)",(user['id'],user['id'],selected))
+        allowed_ids=[r['id'] for r in allowed_rows]
+    rows=markbook_class_summary(selected,selected_subject,allowed_ids) if selected else []
     return render_template('performance.html',settings=school_settings(),classes=classes,selected=selected,selected_subject=selected_subject,rows=rows,subjects=subjects,actor_name=user['full_name'],role=user['role'],leadership=user['leadership_role'],senior=senior)
 
 @app.route("/reception")
@@ -4637,12 +4732,111 @@ def admin_dashboard():
     )
 
 
-def safe_markbook_class_summary(class_name, subject=None):
+def markbook_class_summary(class_name, subject=None, student_ids=None):
+    """Compute weighted assessment averages and positions for one class/subject.
+    When student_ids is supplied, the result is restricted to that exact roster.
+    """
+    if not class_name:
+        return []
+    params=[class_name]
+    where=["m.class_name = ?", "s.active=1"]
+    if subject:
+        where.append("lower(trim(m.subject)) = lower(trim(?))")
+        params.append(subject)
+    if student_ids is not None:
+        ids=[int(x) for x in student_ids if str(x).isdigit()]
+        if not ids:
+            return []
+        where.append("s.id IN ("+','.join('?' for _ in ids)+")")
+        params.extend(ids)
+    rows=q(f"""SELECT m.student_id,s.full_name,s.admission_no,m.mark,m.max_mark,COALESCE(m.weight,100) AS weight
+              FROM markbook_entries m JOIN students s ON s.id=m.student_id
+              WHERE {' AND '.join(where)} ORDER BY s.full_name,m.created_at,m.id""",tuple(params))
+    grouped={}
+    for r in rows:
+        sid=r['student_id']; max_mark=float(r['max_mark'] or 0); mark=float(r['mark'] or 0); weight=float(r['weight'] or 100)
+        if max_mark <= 0 or weight <= 0: continue
+        item=grouped.setdefault(sid,{'student_id':sid,'full_name':r['full_name'],'admission_no':r['admission_no'],'weighted':0.0,'weights':0.0})
+        item['weighted'] += max(0.0,min(mark,max_mark))/max_mark*100.0*weight
+        item['weights'] += weight
+    result=[]
+    for item in grouped.values():
+        score=item['weighted']/item['weights'] if item['weights'] else 0.0
+        grade='A' if score>=80 else ('B' if score>=70 else ('C' if score>=60 else ('D' if score>=50 else 'E')))
+        result.append({'student_id':item['student_id'],'full_name':item['full_name'],'admission_no':item['admission_no'],'score':score,'grade':grade})
+    result.sort(key=lambda x:(-x['score'],x['full_name'].lower()))
+    last_score=None; position=0
+    for idx,row in enumerate(result,1):
+        if last_score is None or abs(row['score']-last_score)>1e-9: position=idx
+        row['position']=position; last_score=row['score']
+    return result
+
+
+def safe_markbook_class_summary(class_name, subject=None, student_ids=None):
     try:
-        return markbook_class_summary(class_name, subject)
+        return markbook_class_summary(class_name, subject, student_ids)
     except Exception as exc:
         app.logger.exception("Non-fatal teacher markbook read failure: %s", exc)
+        record_system_error(source='server', message='Teacher markbook summary failed', error=exc, status_code=500)
         return []
+
+
+@app.route("/teacher/markbook", methods=["POST"])
+@login_required
+def teacher_markbook_save():
+    user=current_user()
+    if user['role'] not in {'Teacher','Admin'}: abort(403)
+    class_name=request.form.get('class_name','').strip(); subject=request.form.get('subject','').strip(); assessment=request.form.get('assessment','').strip()
+    try: max_mark=float(request.form.get('max_mark') or 100); weight=float(request.form.get('weight') or 100)
+    except ValueError: abort(400, 'Invalid markbook settings.')
+    if not class_name or not subject or not assessment or max_mark<=0 or weight<=0: abort(400, 'Class, subject, assessment, maximum mark and weight are required.')
+    if user['role']=='Teacher':
+        class_teacher=bool(q("SELECT 1 FROM class_teacher_assignments WHERE teacher_user_id=? AND class_name=? LIMIT 1",(user['id'],class_name),one=True))
+        assigned=bool(q("SELECT 1 FROM teacher_assignments WHERE teacher_user_id=? AND class_name=? AND active=1 AND lower(trim(subject))=lower(trim(?)) LIMIT 1",(user['id'],class_name,subject),one=True))
+        if not (class_teacher or assigned): abort(403)
+    allowed = q("""SELECT DISTINCT s.id FROM students s
+                   LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
+                   LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=?
+                   WHERE s.active=1 AND s.grade=? AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)""",(user['id'],user['id'],class_name)) if user['role']=='Teacher' else q("SELECT id FROM students WHERE active=1 AND grade=?",(class_name,))
+    allowed_ids={int(r['id']) for r in allowed}
+    saved=0
+    for key,value in request.form.items():
+        if not key.startswith('mark_') or value in ('',None): continue
+        try: sid=int(key[5:]); mark=float(value)
+        except ValueError: continue
+        if sid not in allowed_ids or mark<0 or mark>max_mark: continue
+        existing=q("SELECT id FROM markbook_entries WHERE teacher_user_id=? AND student_id=? AND class_name=? AND lower(trim(subject))=lower(trim(?)) AND assessment=? ORDER BY id DESC LIMIT 1",(user['id'],sid,class_name,subject,assessment),one=True)
+        if existing:
+            execute("UPDATE markbook_entries SET mark=?,max_mark=?,weight=?,status='Submitted' WHERE id=?",(mark,max_mark,weight,existing['id']))
+        else:
+            execute("INSERT INTO markbook_entries(teacher_user_id,class_name,subject,student_id,assessment,mark,max_mark,status,weight) VALUES(?,?,?,?,?,?,?,?,?)",(user['id'],class_name,subject,sid,assessment,mark,max_mark,'Submitted',weight))
+        saved+=1
+    flash('Saved %d mark%s for %s.' % (saved, 's' if saved != 1 else '', assessment), 'success')
+    return redirect('/teacher/dashboard#markbook')
+
+
+@app.route("/teacher/markbook/summary")
+@login_required
+def teacher_markbook_summary():
+    user=current_user()
+    if user['role'] not in {'Teacher','Admin'}: abort(403)
+    class_name=request.args.get('class_name','').strip()
+    subject=request.args.get('subject','').strip()
+    student_ids=None
+    if user['role']=='Teacher':
+        classes=[r['class_name'] for r in q("SELECT class_name FROM class_teacher_assignments WHERE teacher_user_id=?",(user['id'],))]
+        classes += [r['class_name'] for r in q("SELECT class_name FROM teacher_assignments WHERE teacher_user_id=? AND active=1",(user['id'],))]
+        classes += [r['class_name'] for r in q("SELECT DISTINCT class_name FROM student_teacher_assignments WHERE teacher_user_id=? AND active=1",(user['id'],)) if r['class_name']]
+        if not class_name: class_name=sorted(set(classes))[0] if classes else ''
+        allowed_classes=set(classes)
+        if class_name not in allowed_classes: abort(403)
+        ids=q("""SELECT DISTINCT s.id FROM students s
+                LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
+                LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=?
+                WHERE s.active=1 AND s.grade=? AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)""",(user['id'],user['id'],class_name))
+        student_ids=[r['id'] for r in ids]
+    rows=safe_markbook_class_summary(class_name,subject,student_ids)
+    return render_template('performance.html',settings=school_settings(),classes=[class_name] if class_name else [],selected=class_name,selected_subject=subject,rows=rows,subjects=q("SELECT DISTINCT subject FROM markbook_entries WHERE class_name=? ORDER BY subject",(class_name,)) if class_name else [],actor_name=user['full_name'],role=user['role'],leadership=user['leadership_role'],senior=user['role'] in {'Admin','ICT'})
 
 
 @app.route("/teacher/dashboard")
@@ -4669,7 +4863,7 @@ def teacher_dashboard():
             FROM students s
             LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
             LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=?
-            WHERE s.active=1 AND (s.grade IN ({placeholders}) OR sta.id IS NOT NULL OR cta.id IS NOT NULL)
+            WHERE s.active=1 AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)
             ORDER BY s.grade,s.full_name""",(user["id"],user["id"],*classes))
     elif user["role"] in {"Admin","ICT"}:
         students=q("SELECT s.id,s.full_name,s.admission_no,s.grade,s.balance,s.fee_assessed_total,s.payment_status,CASE WHEN s.balance<=0 THEN 'Paid' WHEN s.fee_assessed_total>0 AND s.balance<s.fee_assessed_total THEN 'Partial' ELSE 'Unpaid' END AS payment_bucket,COUNT(ss.id) AS subject_count FROM students s LEFT JOIN student_subjects ss ON ss.student_id=s.id AND ss.status='Approved' WHERE s.active=1 GROUP BY s.id ORDER BY s.grade,s.full_name")
@@ -4679,11 +4873,19 @@ def teacher_dashboard():
     schemes=safe_q("SELECT * FROM scheme_of_work WHERE teacher_user_id=? ORDER BY updated_at DESC,id DESC LIMIT 8",(user['id'],)) if user['role']=='Teacher' else []
     summaries={}
     for cls in classes[:12]:
+        if user['role']=='Teacher':
+            allowed_rows=safe_q("""SELECT DISTINCT s.id FROM students s
+                LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
+                LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=?
+                WHERE s.active=1 AND s.grade=? AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)""",(user['id'],user['id'],cls))
+            allowed_ids=[r['id'] for r in allowed_rows]
+        else:
+            allowed_ids=None
         if cls in class_teacher_classes:
-            summaries[cls]=safe_markbook_class_summary(cls)
+            summaries[cls]=safe_markbook_class_summary(cls,None,allowed_ids)
         else:
             teacher_subject=safe_q("SELECT subject FROM teacher_assignments WHERE teacher_user_id=? AND class_name=? AND active=1 ORDER BY subject LIMIT 1",(user['id'],cls),one=True) if user['role']=='Teacher' else None
-            summaries[cls]=safe_markbook_class_summary(cls,teacher_subject['subject']) if teacher_subject else []
+            summaries[cls]=safe_markbook_class_summary(cls,teacher_subject['subject'],allowed_ids) if teacher_subject else []
     return render_template("teacher_dashboard_pro.html",settings=settings,school_settings=settings,actor_name=user["full_name"],role=user["role"],assignments=assignments,classes=classes,students=students,latest_marks=latest_marks,events=events,workspace_type=workspace_type_for_user(user),upcoming=upcoming,schemes=schemes,class_teacher_classes=class_teacher_classes,mark_summaries=summaries,nav_items=navigation_items("Teacher",settings))
 
 @app.route("/teacher/scheme-of-work", methods=["GET", "POST"])
@@ -6102,8 +6304,8 @@ def student_profile(student_id:int):
     student=q("SELECT * FROM students WHERE id=?",(student_id,),one=True)
     if not student: abort(404)
     user=current_user(); role=user["role"]
-    if role in {"Student","Parent"} and not can_access_student(student_id): abort(403)
     if role not in {"Admin","ICT","Teacher","Finance","Librarian","Student","Parent"}: abort(403)
+    if not can_access_student(student_id): abort(403)
     guardians=q("""SELECT gu.id,gu.full_name,gu.username,gu.phone,gu.email,gl.relationship,gl.is_primary FROM guardian_links gl JOIN users gu ON gu.id=gl.guardian_user_id WHERE gl.student_id=? AND gl.active=1 ORDER BY gl.is_primary DESC,gu.full_name""",(student_id,))
     payments=q("SELECT p.*,u.full_name AS recorder FROM payments p LEFT JOIN users u ON u.id=p.recorded_by WHERE p.student_id=? ORDER BY p.created_at DESC,p.id DESC",(student_id,))
     records=q("SELECT r.*,u.full_name AS author,u.role AS author_role FROM student_records r JOIN users u ON u.id=r.author_user_id WHERE r.student_id=? AND (r.visible_to_parent=1 OR ? IN ('Admin','Teacher','ICT') OR r.author_user_id=?) ORDER BY r.created_at DESC,r.id DESC",(student_id,role,user["id"]))
@@ -6120,6 +6322,7 @@ def student_profile(student_id:int):
 def add_student_record(student_id:int):
     student=q("SELECT id,full_name FROM students WHERE id=?",(student_id,),one=True)
     if not student: abort(404)
+    if not can_access_student(student_id, write=True): abort(403)
     category=request.form.get('category','General').strip() or 'General'
     title=request.form.get('title','').strip(); content=request.form.get('content','').strip()
     if not title or not content:
@@ -6135,6 +6338,7 @@ def add_student_record(student_id:int):
 def toggle_student_record_visibility(student_id:int,record_id:int):
     row=q("SELECT * FROM student_records WHERE id=? AND student_id=?",(record_id,student_id),one=True)
     if not row: abort(404)
+    if not can_access_student(student_id, write=True): abort(403)
     visible=1 if request.form.get('visible_to_parent')=='1' else 0
     execute("UPDATE student_records SET visible_to_parent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",(visible,record_id))
     audit(current_user()['id'],current_user()['full_name'],'Student Record Visibility',f"Record #{record_id} visibility set to {visible}.")
@@ -6145,8 +6349,19 @@ def toggle_student_record_visibility(student_id:int,record_id:int):
 @role_required("Admin","Teacher","ICT")
 def student_search():
     term=request.args.get('q','').strip()
-    rows=q("SELECT id,full_name,admission_no,grade,payment_status,balance,active FROM students WHERE full_name LIKE ? OR admission_no LIKE ? ORDER BY full_name LIMIT 100",(f'%{term}%',f'%{term}%')) if term else q("SELECT id,full_name,admission_no,grade,payment_status,balance,active FROM students WHERE active=1 ORDER BY full_name LIMIT 100")
+    if current_user()['role']=='Teacher':
+        like=f'%{term}%'
+        rows=q("""SELECT DISTINCT s.id,s.full_name,s.admission_no,s.grade,s.payment_status,s.balance,s.active
+                 FROM students s
+                 LEFT JOIN student_teacher_assignments sta ON sta.student_id=s.id AND sta.teacher_user_id=? AND sta.active=1
+                 LEFT JOIN class_teacher_assignments cta ON cta.class_name=s.grade AND cta.teacher_user_id=?
+                 WHERE s.active=1 AND (sta.id IS NOT NULL OR cta.id IS NOT NULL)
+                   AND (?='' OR s.full_name LIKE ? OR s.admission_no LIKE ?)
+                 ORDER BY s.full_name LIMIT 100""",(current_user()['id'],current_user()['id'],term,like,like))
+    else:
+        rows=q("SELECT id,full_name,admission_no,grade,payment_status,balance,active FROM students WHERE full_name LIKE ? OR admission_no LIKE ? ORDER BY full_name LIMIT 100",(f'%{term}%',f'%{term}%')) if term else q("SELECT id,full_name,admission_no,grade,payment_status,balance,active FROM students WHERE active=1 ORDER BY full_name LIMIT 100")
     return render_template('student_search.html',rows=rows,term=term,settings=school_settings(),role=current_user()['role'],actor_name=current_user()['full_name'])
+
 
 @app.route("/students/<int:student_id>/update", methods=["POST"])
 @login_required
@@ -7206,6 +7421,61 @@ def admin_root_required(view):
         return view(*args, **kwargs)
     return wrapper
 
+@app.route('/api/system-errors/client', methods=['POST'])
+def client_system_error():
+    data=request.get_json(silent=True) or {}
+    if not isinstance(data,dict): data={}
+    message=str(data.get('message') or 'Browser-reported error')[:5000]
+    status=int(data.get('status_code') or 0) if str(data.get('status_code') or '').isdigit() else 0
+    rid=record_system_error(source='browser', message=message, status_code=status, level=str(data.get('level') or 'ERROR')[:20], request_id=data.get('request_id'), client_context=data.get('client_context') or data.get('context') or '', error=None)
+    return jsonify({'ok':True,'request_id':rid})
+
+
+@app.route('/admin/errors')
+@login_required
+@admin_root_required
+def admin_errors():
+    return render_template('admin_errors.html', settings=school_settings(), actor_name=admin_root_user()['full_name'])
+
+
+@app.route('/admin/errors/data')
+@login_required
+@admin_root_required
+def admin_errors_data():
+    day=(request.args.get('day') or '').strip()
+    raw_limit=(request.args.get('limit') or '500').strip().lower()
+    limit=None if raw_limit=='all' else min(max(int(raw_limit),1),2000)
+    where=''; params=[]
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}',day):
+        where="WHERE substr(created_at,1,10)=?"; params.append(day)
+    sql=f"""SELECT id,created_at,level,source,method,path,endpoint,status_code,user_id,username,role,message,exception_type,traceback,user_agent,request_id,client_context
+               FROM system_errors {where} ORDER BY created_at DESC,id DESC"""
+    if limit is not None:
+        sql += " LIMIT ?"; params.append(limit)
+    rows=q(sql,tuple(params))
+    combined=[dict(r) for r in rows]
+    fallback=DATA_DIR/'system-errors.jsonl'
+    if fallback.exists():
+        try:
+            extras=[]
+            with fallback.open('r',encoding='utf-8',errors='replace') as fh:
+                for line in fh:
+                    try:
+                        item=json.loads(line)
+                    except Exception:
+                        continue
+                    if day and re.fullmatch(r'\d{4}-\d{2}-\d{2}',day) and not str(item.get('created_at','')).startswith(day):
+                        continue
+                    item.setdefault('source','fallback'); item.setdefault('level','ERROR'); item.setdefault('status_code',0)
+                    item['id']='fallback-'+str(len(extras)+1); extras.append(item)
+            combined.extend(extras)
+            combined.sort(key=lambda x:(str(x.get('created_at','')),str(x.get('id',''))), reverse=True)
+            if limit is not None: combined=combined[:limit]
+        except OSError:
+            pass
+    return jsonify({'ok':True,'rows':combined})
+
+
 def _full_portal_backup_name(prefix="prime-institution-full-portal"):
     return f"{prefix}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
 
@@ -7521,8 +7791,18 @@ def api_student(student_id: int):
     return jsonify({"student": dict(student), "payments": [dict(p) for p in payments]})
 
 
+@app.errorhandler(400)
+def bad_request(error):
+    record_system_error(source='server', message=str(error) or 'Bad request', error=error, status_code=400)
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
+            "<div class='eyebrow'>Request error</div><h1>That action was not accepted</h1><p class='muted'>The portal recorded the failed request so it can be investigated.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/dashboard'>My workspace</a></div></section></main></body></html>"), 400
+
+
 @app.errorhandler(403)
-def forbidden(_):
+def forbidden(error):
+    record_system_error(source='server', message='Forbidden request', error=error, status_code=403)
     return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
             "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'>"
             "<main class='auth-shell'><section class='auth-card glass'><div class='eyebrow'>Access</div><h1>That area is restricted</h1>"
@@ -7531,9 +7811,19 @@ def forbidden(_):
             "</section></main></body></html>"), 403
 
 
+@app.errorhandler(405)
+def method_not_allowed(error):
+    record_system_error(source='server', message='Method not allowed', error=error, status_code=405)
+    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
+            "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
+            "<div class='eyebrow'>Request error</div><h1>That action is not available here</h1><p class='muted'>The failed action has been recorded for diagnostics.</p>"
+            "<div class='quick-actions'><a class='btn btn-primary' href='/dashboard'>My workspace</a></div></section></main></body></html>"), 405
+
+
 @app.errorhandler(500)
 def internal_error(error):
     app.logger.exception("Unhandled Prime application error: %s", error)
+    record_system_error(source='server', message='Unhandled application exception', error=error, status_code=500)
     role=(session.get("active_portal_role") or "").strip()
     target={"Admin":"/admin/dashboard","ICT":"/ict-dashboard","Finance":"/finance-dashboard",
             "Teacher":"/teacher/dashboard","Student":"/student/dashboard","Parent":"/parent-dashboard",
@@ -7555,7 +7845,8 @@ def unexpected_error(error):
 
 
 @app.errorhandler(404)
-def not_found(_):
+def not_found(error):
+    record_system_error(source='server', message='Page not found', error=error, status_code=404)
     return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
             "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
             "<div class='eyebrow'>Prime Portal</div><h1>Page not found</h1><p class='muted'>That destination is unavailable, but the school portal is still online.</p>"
@@ -7564,7 +7855,8 @@ def not_found(_):
 
 
 @app.errorhandler(413)
-def too_large(_):
+def too_large(error):
+    record_system_error(source='server', message='Request payload too large', error=error, status_code=413)
     return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Prime Portal</title>"
             "<link rel='stylesheet' href='/static/css/style.css'></head><body class='auth-body'><main class='auth-shell'><section class='auth-card glass'>"
             "<div class='eyebrow'>Upload</div><h1>File too large</h1><p class='muted'>The upload was not accepted. Your session is safe.</p>"

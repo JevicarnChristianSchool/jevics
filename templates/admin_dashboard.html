@@ -34,7 +34,7 @@
 
     <nav class="side-nav side-nav-groups" aria-label="Admin sections">
       <section class="nav-group open"><button class="nav-group-toggle" type="button" aria-expanded="true" data-target="admin-overview-panel"><span>Home</span><span class="nav-caret">⌂</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="admin-overview-panel">QR & daily attendance</button></div></section>
-      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="people-links"><span>People</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><a class="nav-link" href="/admin/learners">Students</a><a class="nav-link" href="/admin/employees">Employees</a><a class="nav-link" href="/allocate">Allocate</a></div></section>
+      <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="people-links"><span>People</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><a class="nav-link" href="/admin/learners">Students</a><a class="nav-link" href="/admin/employees">Employees</a><button class="nav-link nav-action" type="button" data-target="user-management-panel">User accounts</button><a class="nav-link" href="/allocate">Allocate</a></div></section>
       <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="analytics-panel"><span>Summary & Analytics</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="admin-overview-panel" data-scroll="admin-metrics">Summary</button><button class="nav-link nav-action" type="button" data-target="analytics-panel">Charts & breakdowns</button></div></section>
       <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="operations-links"><span>Operations</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><a class="nav-link" href="/admin/attendance">Attendance detail</a><a class="nav-link" href="/staff/timetable">Timetable</a><a class="nav-link" href="/staff/reminders">Reminders</a><a class="nav-link" href="/calendar">School calendar</a><a class="nav-link" href="/reception">Reception</a><a class="nav-link" href="/admin/communication-requests">Public communication</a><a class="nav-link" href="/admin/transport">Driver monitoring · Live map</a></div></section>
       <section class="nav-group"><button class="nav-group-toggle" type="button" aria-expanded="false" data-target="finance-panel"><span>Finance</span><span class="nav-caret">▾</span></button><div class="nav-group-links"><button class="nav-link nav-action" type="button" data-target="finance-panel">Finance overview</button><a class="nav-link" href="/finance-dashboard">Finance workspace</a></div></section>
@@ -279,6 +279,19 @@
       </div>
     </section>
 
+    <section id="user-management-panel" class="panel glass workspace-panel hidden">
+      <div class="panel-head"><div><div class="eyebrow">People · Account management</div><h3>Users, roles & access</h3><p class="muted">Change roles, workspaces, passwords, access and account status from one place. Support Staff is a clear profile for reception, security, catering and other non-teaching workers.</p></div><div class="quick-actions"><a class="btn btn-primary" href="/users/add">+ Add staff / support account</a><a class="btn btn-ghost" href="/admin/employees">Full staff directory</a></div></div>
+      <div class="directory-toolbar" style="margin:12px 0"><input id="adminUserFilter" type="search" placeholder="Search name, username, role, department or workspace..."></div>
+      <div class="table-wrap"><table id="adminUserTable"><thead><tr><th>Person</th><th>Role</th><th>Workspace</th><th>Department</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      {% for u in users %}<tr data-user-search="{{ (u.full_name|string + ' ' + (u.username|string if u.username is defined else '') + ' ' + (u.role|string) + ' ' + (u.department|string if u.department is defined else '') + ' ' + (u.workspace_type|string if u.workspace_type is defined else ''))|lower }}">
+        <td><strong>{{u.full_name}}</strong><div class="muted">{{u.username}}</div></td>
+        <td>{% if u.role=='Teacher' and u.workspace_type and u.workspace_type!='Teaching' %}Support Staff{% else %}{{u.role}}{% endif %}</td>
+        <td>{{u.workspace_type or 'Teaching'}}</td><td>{{u.department or '—'}}</td><td>{{'Active' if u.active else 'Archived'}}</td>
+        <td><div class="directory-actions"><a class="btn btn-primary mini" href="/users/{{u.id}}/edit">Edit</a>{% if u.active and u.id != current_user.id %}<a class="btn btn-ghost mini" href="/admin/access/{{u.id}}">Open as</a><form method="post" action="/users/{{u.id}}/archive" onsubmit="return confirm('Archive this account? Historical records remain.');"><button class="btn btn-ghost mini" type="submit">Archive</button></form>{% endif %}{% if not u.active and u.id != current_user.id %}<form method="post" action="/users/{{u.id}}/restore"><button class="btn btn-primary mini" type="submit">Restore</button></form>{% endif %}{% if u.id != current_user.id %}<form method="post" action="/users/{{u.id}}/delete" onsubmit="return confirm('Permanently delete this account? This cannot be undone.');"><button class="btn btn-danger mini" type="submit">Delete</button></form>{% endif %}</div></td>
+      </tr>{% else %}<tr><td colspan="6" class="muted">No non-system accounts yet.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
     <section id="finance-panel" class="panel glass workspace-panel hidden">
       <div class="panel-head"><div><div class="eyebrow">Finance</div><h3>Income, deductions, and balances</h3></div></div>
       <div class="stats-grid" style="margin-bottom:16px">
@@ -462,5 +475,6 @@
   document.getElementById('scrollCreateUser')?.addEventListener('click',()=>document.getElementById('create-user-card')?.scrollIntoView({behavior:'smooth',block:'start'}));
 })();
 </script>
+<script>(function(){const f=document.getElementById('adminUserFilter');f?.addEventListener('input',()=>{const q=f.value.toLowerCase().trim();document.querySelectorAll('#adminUserTable tbody tr[data-user-search]').forEach(r=>r.style.display=!q||r.dataset.userSearch.includes(q)?'':'none')});})();</script>
 {% include '_footer.html' %}</body>
 </html>

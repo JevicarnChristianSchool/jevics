@@ -72,6 +72,13 @@ PULSE_ALLOWED_CALLBACK_HOSTS = {h.strip().lower() for h in os.environ.get("PULSE
 ALLOWED_RESTORE_EXT = {"db", "sqlite", "sqlite3"}
 PUBLIC_ROLES = ("Teacher", "Student", "Parent", "Librarian", "Driver")
 HIDDEN_ROLES = ("Admin", "ICT", "Finance")
+# "Support Staff" is a UI-level account profile backed by the existing Teacher
+# role plus a non-teaching workspace. This avoids another SQLite role migration
+# while giving administrators a proper, non-confusing option for support workers.
+STAFF_PROFILE_LABELS = {
+    "Teaching": "Teacher", "Driver": "Driver", "Reception": "Reception staff",
+    "Guard": "Security / Guard", "Cook": "Catering / Cook", "Other Staff": "Support Staff",
+}
 QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian", "Driver"}
 QR_LOGIN_WORKSPACES = {"Teaching", "Driver", "Reception", "Guard", "Cook", "Other Staff"}
 E_LEARNING_ROLES = {"Admin", "ICT", "Teacher", "Student"}
@@ -2215,11 +2222,15 @@ def specialized_dashboard_for(user) -> str:
         pass
     if role == "Student":
         return role_target("Student")
+    # Workspace wins for non-teaching support workers, even when their legacy
+    # stored role is Teacher. This prevents guards, cooks and other support
+    # staff from ever landing on the teacher dashboard.
     if wt == "Reception" and role not in {"Admin", "ICT"}: return url_for("reception_dashboard")
-    if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian"}:
+    if wt == "Driver" and role not in {"Admin", "ICT"}: return url_for("driver_dashboard")
+    if wt in {"Guard","Cook","Other Staff"} and role not in {"Admin", "ICT"}:
+        return url_for("workforce_dashboard", kind=wt)
+    if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian","Driver"}:
         return role_target(role)
-    if wt=="Driver": return url_for("driver_dashboard")
-    if wt in {"Guard","Cook","Other Staff"}: return url_for("workforce_dashboard", kind=wt)
     # Unknown/legacy staff is sent to the generic dashboard dispatcher rather
     # than generating a Not Found page.
     return url_for("dashboard")
@@ -2596,13 +2607,18 @@ def navigation_items(role: str, settings):
     if not int(settings["library_enabled"] or 0) and role not in {"Admin","ICT","Librarian"}:
         allowed=[x for x in allowed if x!="Library"]
     anchor_map={"Home":"home","Assignments":"assignments","Submissions":"submissions","Flashcards":"flashcards","Online classes":"classes","Results":"results","My children":"children","Results & fees":"results","Teacher communication":"messages","Finance":"finance","Payments":"payments","Branding":"branding","Theme":"theme","Navigation order":"navigation","Elections":"elections","Library":"library","Institution":"institution","Members":"users"}
+    href_map={
+        "ICT": {"Home": url_for("ict_dashboard"), "Members": url_for("all_employees"), "Library": url_for("librarian_dashboard"),
+                "Elections": "#elections", "Branding": "#themes", "Theme": "#themes", "Navigation order": "#ict-tools"},
+        "Finance": {"Home": url_for("finance_dashboard"), "Finance": "#overview", "Payments": "#student-fees", "Library": url_for("librarian_dashboard")},
+    }.get(role, {})
     result=[]
     for key in order:
         if key in allowed and key not in [r["key"] for r in result]:
-            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key]})
+            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key],"href":href_map.get(key, "#"+anchor_map[key])})
     for key in allowed:
         if key not in [r["key"] for r in result]:
-            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key]})
+            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key],"href":href_map.get(key, "#"+anchor_map[key])})
     return result
 
 
@@ -6852,13 +6868,20 @@ def add_user():
     username=request.form.get("username", "").strip().lower()
     password=request.form.get("password", "")
     role=request.form.get("role", "Teacher")
+    if role == "Support Staff":
+        role = "Teacher"
+        request_workspace = request.form.get("workspace_type", "Other Staff").strip() or "Other Staff"
+        if request_workspace == "Teaching":
+            request_workspace = "Other Staff"
+    else:
+        request_workspace = request.form.get("workspace_type", "Teaching").strip() or "Teaching"
     if role in {"Student", "Parent", "System"}:
         flash("Student and parent records are not staff accounts. Use the administrator-only student intake.", "warning")
         return redirect(request.referrer or url_for("admin_dashboard"))
     title=request.form.get("title", "").strip()
     leadership_role=request.form.get("leadership_role", "").strip()
     department=request.form.get("department", "").strip()
-    workspace_type=request.form.get("workspace_type", "Teaching").strip() or "Teaching"
+    workspace_type=request_workspace
     if workspace_type not in {"Teaching","Driver","Reception","Guard","Cook","Other Staff"}: workspace_type="Teaching"
     student_id=request.form.get("student_id") or None
     allowed=set(ALL_PORTAL_ROLES) - {SYSTEM_ROLE, "Student", "Parent"}
@@ -6925,10 +6948,16 @@ def edit_user(user_id:int):
     if actor["role"]=="ICT" and user["role"] in {"Admin","ICT"}: abort(403)
     if request.method=="POST":
         role=request.form.get("role",user["role"])
+        if role == "Support Staff":
+            role = "Teacher"
+            submitted_workspace = request.form.get("workspace_type", "Other Staff").strip() or "Other Staff"
+            if submitted_workspace == "Teaching": submitted_workspace = "Other Staff"
+        else:
+            submitted_workspace = request.form.get("workspace_type", user["workspace_type"] if "workspace_type" in user.keys() else "Teaching").strip() or "Teaching"
         if user["id"] == actor["id"] and role != actor["role"]:
             flash("The currently signed-in Administrator account cannot be changed into another role. Create or edit another account instead.", "warning")
             return redirect(url_for("edit_user", user_id=user_id))
-        workspace_type=request.form.get("workspace_type", user["workspace_type"] if "workspace_type" in user.keys() else "Teaching").strip() or "Teaching"
+        workspace_type=submitted_workspace
         if workspace_type not in {"Teaching","Driver","Reception","Guard","Cook","Other Staff"}: workspace_type="Teaching"
         if actor["role"]=="ICT" and role in {"Admin","ICT"}: abort(403)
         if role not in set(ALL_PORTAL_ROLES)-{SYSTEM_ROLE, "Student"}: abort(400)
@@ -6956,7 +6985,8 @@ def edit_user(user_id:int):
         return redirect(url_for("admin_dashboard"))
     students=q("SELECT id, full_name, admission_no FROM students WHERE active=1 ORDER BY full_name")
     depts=q("SELECT name FROM departments WHERE active=1 ORDER BY name")
-    return render_template("user_edit.html", user=user, students=students, departments=depts, role_options=tuple(r for r in ALL_PORTAL_ROLES if r != "Student"), guardian_links=q("SELECT * FROM guardian_links WHERE guardian_user_id=? AND active=1",(user_id,)))
+    profile_role = "Support Staff" if user["role"] == "Teacher" and (user["workspace_type"] or "Teaching") == "Other Staff" else user["role"]
+    return render_template("user_edit.html", user=user, students=students, departments=depts, role_options=("Admin","ICT","Finance","Teacher","Support Staff","Librarian","Driver","Parent"), profile_role=profile_role, guardian_links=q("SELECT * FROM guardian_links WHERE guardian_user_id=? AND active=1",(user_id,)))
 
 @app.route("/users/<int:user_id>/reset-password", methods=["POST"])
 @login_required

@@ -4143,7 +4143,7 @@ SYSTEM_SEARCH_INDEX = [
     {"title":"Home / QR attendance", "description":"Scan or manually record staff check-in and check-out", "url":"/admin-dashboard", "roles":{"Admin","ICT"}, "keywords":"home qr attendance check in check out login offline manual"},
     {"title":"View all employees", "description":"Staff directory, edit, add, delete and attendance history", "url":"/admin/employees", "roles":{"Admin","ICT"}, "keywords":"employees staff people users edit delete add attendance"},
     {"title":"View all learners", "description":"Student directory and learner records", "url":"/admin/learners", "roles":{"Admin","ICT"}, "keywords":"students learners pupils people access directory"},
-    {"title":"Attendance", "description":"Day, week, month, 3 months, 6 months, 8 months and year reports", "url":"/admin/attendance", "roles":{"Admin","ICT"}, "keywords":"attendance qr checkin checkout signed in signed out missed absence reports"},
+    {"title":"Staff attendance", "description":"Review staff check-in, check-out, location, capture and absence reasons", "url":"/notifications?attendance_range=day#staff-attendance", "roles":{"Admin","ICT"}, "keywords":"attendance qr checkin checkout signed in signed out missed absence reports staff notifications"},
     {"title":"Staff timetable", "description":"Schedules for teachers and relevant staff", "url":"/staff/timetable", "roles":{"Admin","ICT","Teacher","Finance","Driver","Reception","Librarian"}, "keywords":"timetable schedule staff teacher class time"},
     {"title":"Reminders", "description":"Operational reminders and due work", "url":"/staff/reminders", "roles":{"Admin","ICT","Teacher","Finance","Driver","Reception","Librarian"}, "keywords":"reminders tasks alerts due"},
     {"title":"School settings", "description":"School identity, admissions, fees and institution configuration", "url":"/admin-dashboard#settings-panel", "roles":{"Admin","ICT"}, "keywords":"settings school setting configuration fees admissions school name institution"},
@@ -5458,6 +5458,19 @@ def ict_settings():
     return redirect(url_for("ict_dashboard" if current_user()["role"]=="ICT" else "admin_dashboard"))
 
 
+def _remove_public_upload(path):
+    try:
+        raw=str(path or '').strip()
+        if not raw.startswith('uploads/'):
+            return
+        rel=Path(raw[len('uploads/'):])
+        base=UPLOAD_DIR.resolve()
+        target=(base/rel).resolve()
+        if base in target.parents and target.exists() and target.is_file():
+            target.unlink()
+    except Exception:
+        pass
+
 @app.route("/ict/landing-branding", methods=["POST"])
 @login_required
 @role_required("Admin", "ICT")
@@ -5482,8 +5495,11 @@ def ict_landing_branding():
     if vals["landing_hero_layout"] not in {"split","stacked"}: vals["landing_hero_layout"]="split"
     positions=[request.form.get(f"institution_image_{i}_position","50% 50%").strip()[:40] for i in (1,2,3)]
     paths=[]
+    current_settings=school_settings()
     landing_file=request.files.get("landing_background")
-    landing_path=school_settings()["landing_background_path"] or ""
+    landing_path=current_settings["landing_background_path"] or ""
+    if request.form.get("remove_landing_background") == "1" and not (landing_file and landing_file.filename):
+        _remove_public_upload(landing_path); landing_path=""
     if landing_file and landing_file.filename:
         ext=landing_file.filename.rsplit('.',1)[-1].lower() if '.' in landing_file.filename else ''
         if ext not in {"png","jpg","jpeg","webp"}:
@@ -5492,8 +5508,10 @@ def ict_landing_branding():
         out=folder/f"landing-bg-{uuid.uuid4().hex[:10]}.{ext}"; landing_file.save(out); landing_path="uploads/institution/"+out.name
     for i in (1,2,3):
         file=request.files.get(f"institution_image_{i}")
-        existing=school_settings()[f"institution_image_{i if i>1 else 1}_path"] if i>1 else school_settings()["institution_image_path"]
+        existing=current_settings[f"institution_image_{i if i>1 else 1}_path"] if i>1 else current_settings["institution_image_path"]
         path=existing or ""
+        if request.form.get(f"remove_institution_image_{i}") == "1" and not (file and file.filename):
+            _remove_public_upload(path); path=""
         if file and file.filename:
             ext=file.filename.rsplit('.',1)[-1].lower() if '.' in file.filename else ''
             if ext not in {"png","jpg","jpeg","webp"}:
@@ -5674,7 +5692,38 @@ def notifications_view():
         classes=sorted(set(own))
     elif user["role"] in {"Admin","ICT"}:
         classes=[r["grade"] for r in q("SELECT DISTINCT grade FROM students WHERE active=1 AND TRIM(COALESCE(grade,''))!='' ORDER BY grade")]
-    return render_template("notifications.html",settings=school_settings(),notifications=rows,actor_name=user["full_name"],role=user["role"],notification_recipients=recipients,notification_classes=classes)
+
+    # Attendance is intentionally reviewed here for Admin/ICT only. The older
+    # standalone staff-attendance screens remain as backend routes for compatibility,
+    # but are no longer part of the normal navigation or review flow.
+    attendance_rows=[]; absence_rows=[]; attendance_window='day'
+    if user["role"] in {"Admin","ICT"}:
+        allowed_ranges={'day':'Today','week':'This week','month':'This month','3m':'3 months','6m':'6 months','year':'This year'}
+        attendance_window=(request.args.get('attendance_range') or 'day').strip().lower()
+        if attendance_window not in allowed_ranges: attendance_window='day'
+        now_local=_local_now_naive()
+        if attendance_window=='day': start_date=end_date=now_local.date()
+        elif attendance_window=='week':
+            start_date=now_local.date()-timedelta(days=now_local.weekday()); end_date=start_date+timedelta(days=6)
+        elif attendance_window=='month':
+            start_date=now_local.date().replace(day=1); end_date=now_local.date()
+        elif attendance_window in {'3m','6m'}:
+            months=3 if attendance_window=='3m' else 6
+            start_date=(now_local.date().replace(day=1)-timedelta(days=months*31)).replace(day=1); end_date=now_local.date()
+        else:
+            start_date=now_local.date().replace(month=1,day=1); end_date=now_local.date()
+        start_utc=attendance_day_bounds_utc(start_date.isoformat())[0]; end_utc=attendance_day_bounds_utc(end_date.isoformat())[1]
+        attendance_rows=q("""SELECT a.id,a.user_id,a.action,a.event_at,a.method,a.source,a.latitude,a.longitude,a.accuracy,a.device_note,a.location_label,
+               u.full_name,u.role,COALESCE(NULLIF(u.title,''),u.role) AS title,u.staff_category,u.workspace_type,u.staff_code
+               FROM attendance_events a JOIN users u ON u.id=a.user_id
+               WHERE a.event_at>=? AND a.event_at<? AND u.active=1 AND u.role NOT IN ('Student','Parent','System')
+               ORDER BY a.event_at DESC,a.id DESC LIMIT 1000""",(start_utc,end_utc))
+        absence_rows=q("""SELECT ar.id,ar.user_id,ar.absence_date,ar.reason,ar.status,ar.requested_at,ar.reviewed_at,ar.review_note,u.full_name,u.role,
+               COALESCE(NULLIF(u.title,''),u.role) AS title,u.staff_category,u.workspace_type,u.staff_code
+               FROM attendance_absence_requests ar JOIN users u ON u.id=ar.user_id
+               WHERE ar.absence_date>=? AND ar.absence_date<=? AND u.active=1 AND u.role NOT IN ('Student','Parent','System')
+               ORDER BY ar.absence_date DESC,ar.id DESC LIMIT 500""",(start_date.isoformat(),end_date.isoformat()))
+    return render_template("notifications.html",settings=school_settings(),notifications=rows,actor_name=user["full_name"],role=user["role"],notification_recipients=recipients,notification_classes=classes,attendance_rows=attendance_rows,absence_rows=absence_rows,attendance_window=attendance_window)
 
 @app.route("/notifications/read", methods=["POST"])
 @login_required

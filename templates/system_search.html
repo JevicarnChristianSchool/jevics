@@ -29,7 +29,7 @@
           <div class="topbar-subtitle">Search features, settings, QR tools, people and records available to your dashboard.</div>
         </div>
         <div class="quick-actions">
-          <a class="btn btn-ghost" href="{{ '{{ url_for("admin_dashboard") }}' if role=='Admin' else '/ict' if role=='ICT' else '/dashboard' }}">Home</a>
+          <a class="btn btn-ghost" href="{{ url_for('admin_dashboard') if role=='Admin' else url_for('ict_dashboard') if role=='ICT' else url_for('dashboard') }}">Home</a>
           <a class="btn btn-ghost" href="/logout">Logout</a>
         </div>
       </header>

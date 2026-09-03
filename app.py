@@ -2182,6 +2182,25 @@ def staff_category_for(user):
         return 'Teaching Staff'
     return role or 'Staff'
 
+def account_role_label(user):
+    """Human-facing account role used by admin screens.
+
+    Keep the database security role stable while allowing the institution to
+    describe Teacher-authenticated support/leadership accounts accurately.
+    """
+    if not user:
+        return 'Staff'
+    role = str((user['role'] if 'role' in user.keys() else '') or '').strip()
+    if role in {'Admin','ICT','Finance','Librarian','Student','Parent','System'}:
+        return role
+    category = staff_category_for(user)
+    if category in {'Teaching Staff','Support Staff','Leadership','Professional / Office Staff'}:
+        return category
+    wt = str((user['workspace_type'] if 'workspace_type' in user.keys() else '') or '').strip()
+    if wt in {'Driver','Reception','Guard','Cook','Other Staff'}:
+        return 'Support Staff'
+    return role or category or 'Staff'
+
 def resolve_staff_token(raw_token: str):
     token=(raw_token or '').strip()
     if token.startswith('STAFF|'):
@@ -7046,6 +7065,7 @@ def edit_user(user_id:int):
         role=request.form.get("role",user["role"])
         if account_type in {"Support Staff","Leadership","Teaching Staff"}: role="Teacher"
         elif account_type in {"Librarian","Finance","ICT"}: role=account_type
+        elif account_type == "": account_type=account_role_label(user)
         if user["id"] == actor["id"] and role != actor["role"]:
             flash("The currently signed-in Administrator account cannot be changed into another role. Create or edit another account instead.", "warning")
             return redirect(url_for("edit_user", user_id=user_id))
@@ -7066,7 +7086,7 @@ def edit_user(user_id:int):
         if conflict:
             flash("Username already exists. Choose a different username.", "danger")
             return redirect(url_for("edit_user", user_id=user_id))
-        new_title=request.form.get("title","").strip(); leadership_role=request.form.get("leadership_role","").strip(); staff_category=request.form.get("staff_category","").strip() or (account_type if account_type in {"Support Staff","Leadership","Teaching Staff"} else ("Support Staff" if workspace_type in {"Driver","Reception","Guard","Cook","Other Staff"} else ("Teaching Staff" if role=="Teacher" else role))); leadership_level=1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0; school_unit=request.form.get("school_unit","").strip() or school_settings()["school_name"]; school_location=request.form.get("school_location","").strip(); reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
+        new_title=request.form.get("title","").strip(); leadership_role=request.form.get("leadership_role","").strip(); staff_category=(account_type if account_type in {"Support Staff","Leadership","Teaching Staff","Professional / Office Staff"} else ("Support Staff" if workspace_type in {"Driver","Reception","Guard","Cook","Other Staff"} else ("Teaching Staff" if role=="Teacher" else role))); leadership_level=1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0; school_unit=request.form.get("school_unit","").strip() or school_settings()["school_name"]; school_location=request.form.get("school_location","").strip(); reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
         existing_code=user["position_code"] or user["staff_code"] or (staff_code_for(role,workspace_type) if role not in {"Student","Parent","System"} else "")
         execute("""UPDATE users SET full_name=?, username=?, role=?, student_id=?, title=?, department=?, phone=?, email=?, date_of_birth=?, gender=?, id_reference=?, address=?, emergency_contact=?, blood_group=?, medical_notes=?, accountability_notes=?, workspace_type=?, staff_category=?, school_unit=?, school_location=?, leadership_role=?, leadership_level=?, reception_enabled=?, position_code=?, staff_code=? WHERE id=?""",
                (request.form.get("full_name","").strip(),new_username,role,student_id,new_title,request.form.get("department","").strip(),request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,staff_category,school_unit,school_location,leadership_role,leadership_level,reception_enabled,existing_code,existing_code,user_id))
@@ -7381,6 +7401,7 @@ def all_employees():
         r['check_out_time']=(cout+KENYA_TZ_OFFSET).strftime('%I:%M %p').lstrip('0') if cout else ''
         r['check_in_local']=_local_iso(cin) if cin else None; r['check_out_local']=_local_iso(cout) if cout else None
         r['employee_category']=staff_category_for(r)
+        r['account_role_label']=account_role_label(r)
         r['employee_kind']=str(r.get('workspace_type') or r.get('role') or 'Staff')
         r['attendance_capture']='Location captured' if r.get('check_in_location') else ('Not captured — location/device data unavailable' if cin else '—')
         if cin: r['missed_display']='No'

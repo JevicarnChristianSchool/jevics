@@ -72,13 +72,6 @@ PULSE_ALLOWED_CALLBACK_HOSTS = {h.strip().lower() for h in os.environ.get("PULSE
 ALLOWED_RESTORE_EXT = {"db", "sqlite", "sqlite3"}
 PUBLIC_ROLES = ("Teacher", "Student", "Parent", "Librarian", "Driver")
 HIDDEN_ROLES = ("Admin", "ICT", "Finance")
-# "Support Staff" is a UI-level account profile backed by the existing Teacher
-# role plus a non-teaching workspace. This avoids another SQLite role migration
-# while giving administrators a proper, non-confusing option for support workers.
-STAFF_PROFILE_LABELS = {
-    "Teaching": "Teacher", "Driver": "Driver", "Reception": "Reception staff",
-    "Guard": "Security / Guard", "Cook": "Catering / Cook", "Other Staff": "Support Staff",
-}
 QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian", "Driver"}
 QR_LOGIN_WORKSPACES = {"Teaching", "Driver", "Reception", "Guard", "Cook", "Other Staff"}
 E_LEARNING_ROLES = {"Admin", "ICT", "Teacher", "Student"}
@@ -1779,39 +1772,50 @@ def audit(actor_id: int | None, actor_name: str, action: str, details: str) -> N
     )
 
 
-def record_system_error(source='server', message='', error=None, status_code=500, level='ERROR', request_id=None, client_context=''):
-    """Best-effort persistent diagnostics. Never raise while handling another error."""
+def record_system_error(source='server', message='', error=None, status_code=500, level='ERROR', request_id=None, client_context='', traceback_text=''):
+    """Persist diagnostics for the long term. SQLite is primary; an append-only JSONL archive is also written on the persistent volume."""
+    user=getattr(g,'user',None)
+    tb=str(traceback_text or '')[:30000]
+    et=''
+    if error is not None:
+        et=type(error).__name__
+        tb=''.join(traceback.format_exception(type(error),error,error.__traceback__))[:30000]
+    ua=(request.headers.get('User-Agent') or '')[:1000]
+    rid=(request_id or request.headers.get('X-Request-ID') or uuid.uuid4().hex)[:120]
+    username=(user['username'] if user else '') or ''
+    role=(user['role'] if user else '') or ''
+    uid=user['id'] if user else None
+    payload={
+        'created_at':(datetime.utcnow()+timedelta(hours=3)).isoformat(timespec='seconds')+'+03:00',
+        'level':str(level or 'ERROR')[:20],'source':str(source or 'server')[:40],
+        'path':getattr(request,'path',''),'method':getattr(request,'method',''),
+        'endpoint':str(request.endpoint or ''),'status_code':int(status_code or 0),
+        'user_id':uid,'username':username[:200],'role':role[:80],
+        'message':str(message or '')[:5000],'exception_type':et,'traceback':tb,
+        'request_id':rid,'user_agent':ua,'client_context':str(client_context or '')[:15000]
+    }
+    sqlite_ok=False
     try:
-        user=getattr(g,'user',None)
-        tb=''
-        et=''
-        if error is not None:
-            et=type(error).__name__
-            tb=''.join(traceback.format_exception(type(error),error,error.__traceback__))[:30000]
-        ua=(request.headers.get('User-Agent') or '')[:1000]
-        rid=(request_id or request.headers.get('X-Request-ID') or uuid.uuid4().hex)[:120]
-        username=(user['username'] if user else '') or ''
-        role=(user['role'] if user else '') or ''
-        uid=user['id'] if user else None
         execute("""INSERT INTO system_errors(created_at,level,source,method,path,endpoint,status_code,user_id,username,role,message,exception_type,traceback,user_agent,request_id,client_context)
                    VALUES(datetime('now','+3 hours'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (str(level or 'ERROR')[:20],str(source or 'server')[:40],request.method,str(request.path)[:500],str(request.endpoint or '')[:200],int(status_code or 0),uid,username[:200],role[:80],str(message or '')[:5000],et,tb,ua,rid,str(client_context or '')[:15000]))
-        return rid
+                (payload['level'],payload['source'],request.method,str(request.path)[:500],str(request.endpoint or '')[:200],payload['status_code'],uid,username[:200],role[:80],payload['message'],et,tb,ua,rid,payload['client_context']))
+        sqlite_ok=True
     except Exception as log_exc:
-        try:
-            app.logger.exception("Persistent system error logging failed: %s", log_exc)
-        except Exception:
-            pass
-        # Last-resort append-only file. This also survives a temporarily locked SQLite DB.
-        try:
-            DATA_DIR.mkdir(parents=True,exist_ok=True)
-            fallback=DATA_DIR/'system-errors.jsonl'
-            payload={'created_at':datetime.utcnow().isoformat(timespec='seconds')+'Z','level':level,'source':source,'path':getattr(request,'path',''),'method':getattr(request,'method',''),'status_code':status_code,'message':message,'exception_type':type(error).__name__ if error else '','traceback':tb,'request_id':request_id or uuid.uuid4().hex,'user_agent':(request.headers.get('User-Agent') or '')[:1000],'client_context':client_context}
-            with fallback.open('a',encoding='utf-8') as fh: fh.write(json.dumps(payload,ensure_ascii=False)+'\n')
-        except Exception:
-            pass
-        return request_id
-
+        try: app.logger.exception("Persistent system error logging failed: %s", log_exc)
+        except Exception: pass
+    # Never rotate this archive automatically: it is the long-term forensic trail.
+    try:
+        DATA_DIR.mkdir(parents=True,exist_ok=True)
+        archive=DATA_DIR/'system-errors-archive.jsonl'
+        with archive.open('a',encoding='utf-8') as fh:
+            fh.write(json.dumps(payload,ensure_ascii=False)+'\n')
+    except Exception:
+        if sqlite_ok:
+            try:
+                fallback=DATA_DIR/'system-errors.jsonl'
+                with fallback.open('a',encoding='utf-8') as fh: fh.write(json.dumps(payload,ensure_ascii=False)+'\n')
+            except Exception: pass
+    return rid
 
 def record_login_event(user, method='Password', latitude=None, longitude=None, accuracy=None):
     ip=request.headers.get('X-Forwarded-For', request.remote_addr or '')
@@ -1957,6 +1961,7 @@ def _client_error_logger_script():
   function save(o){try{var a=read();a.push(o);if(a.length>200)a=a.slice(-200);localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
   function send(o){o.request_id=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():String(Date.now())+'-'+Math.random();try{if(navigator.sendBeacon){var b=new Blob([JSON.stringify(o)],{type:'application/json'});if(navigator.sendBeacon(PATH,b))return}}catch(e){}try{fetch(PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),keepalive:true}).then(function(r){if(!r.ok)save(o)}).catch(function(){save(o)})}catch(e){save(o)}}
   function log(level,message,stack,status){send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
+  window.__primeLogClientError=function(level,message,stack,status){log(level,message,stack,status)};
   window.addEventListener('error',function(e){log('ERROR',e.message||'JavaScript error',e.error&&e.error.stack||'',0)});
   window.addEventListener('unhandledrejection',function(e){var r=e.reason;log('ERROR',r&&r.message||String(r||'Unhandled promise rejection'),r&&r.stack||'',0)});
   var oldFetch=window.fetch.bind(window);
@@ -2222,14 +2227,13 @@ def specialized_dashboard_for(user) -> str:
         pass
     if role == "Student":
         return role_target("Student")
-    # Workspace wins for non-teaching support workers, even when their legacy
-    # stored role is Teacher. This prevents guards, cooks and other support
-    # staff from ever landing on the teacher dashboard.
-    if wt == "Reception" and role not in {"Admin", "ICT"}: return url_for("reception_dashboard")
-    if wt == "Driver" and role not in {"Admin", "ICT"}: return url_for("driver_dashboard")
-    if wt in {"Guard","Cook","Other Staff"} and role not in {"Admin", "ICT"}:
-        return url_for("workforce_dashboard", kind=wt)
-    if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian","Driver"}:
+    # Workspace is authoritative for non-teaching workforce accounts. A Cook/Guard/
+    # Driver/Reception account must never fall through to the Teacher dashboard just
+    # because legacy data stored role='Teacher'.
+    if role not in {"Admin","ICT"} and wt == "Reception": return url_for("reception_dashboard")
+    if role not in {"Admin","ICT"} and wt == "Driver": return url_for("driver_dashboard")
+    if role not in {"Admin","ICT"} and wt in {"Guard","Cook","Other Staff"}: return url_for("workforce_dashboard", kind=wt)
+    if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian"}:
         return role_target(role)
     # Unknown/legacy staff is sent to the generic dashboard dispatcher rather
     # than generating a Not Found page.
@@ -2607,18 +2611,13 @@ def navigation_items(role: str, settings):
     if not int(settings["library_enabled"] or 0) and role not in {"Admin","ICT","Librarian"}:
         allowed=[x for x in allowed if x!="Library"]
     anchor_map={"Home":"home","Assignments":"assignments","Submissions":"submissions","Flashcards":"flashcards","Online classes":"classes","Results":"results","My children":"children","Results & fees":"results","Teacher communication":"messages","Finance":"finance","Payments":"payments","Branding":"branding","Theme":"theme","Navigation order":"navigation","Elections":"elections","Library":"library","Institution":"institution","Members":"users"}
-    href_map={
-        "ICT": {"Home": url_for("ict_dashboard"), "Members": url_for("all_employees"), "Library": url_for("librarian_dashboard"),
-                "Elections": "#elections", "Branding": "#themes", "Theme": "#themes", "Navigation order": "#ict-tools"},
-        "Finance": {"Home": url_for("finance_dashboard"), "Finance": "#overview", "Payments": "#student-fees", "Library": url_for("librarian_dashboard")},
-    }.get(role, {})
     result=[]
     for key in order:
         if key in allowed and key not in [r["key"] for r in result]:
-            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key],"href":href_map.get(key, "#"+anchor_map[key])})
+            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key]})
     for key in allowed:
         if key not in [r["key"] for r in result]:
-            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key],"href":href_map.get(key, "#"+anchor_map[key])})
+            result.append({"key":key,"label":labels.get(key,key),"anchor":anchor_map[key]})
     return result
 
 
@@ -4135,7 +4134,7 @@ def admin_attendance_live():
         FROM users u
         WHERE u.active=1 AND u.role NOT IN ('Student','Parent','System')
         ORDER BY u.full_name
-    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
+    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
     out=[]
     for r in rows:
         item=dict(r)
@@ -5094,7 +5093,9 @@ def institution_save():
             for item in raw_sections:
                 if not isinstance(item,dict): continue
                 title=str(item.get("title","")).strip()[:160]
-                body=str(item.get("body","")).strip()
+                body=str(item.get("body","")).replace("\r\n","\n").replace("\r","\n")
+                body=re.sub(r"<br\s*/?>", "\n", body, flags=re.I)
+                body=re.sub(r"<[^>]+>", "", body).strip()
                 image=str(item.get("image","")).strip()[:600]
                 caption=str(item.get("caption","")).strip()[:300]
                 layout=item.get("layout","reading")
@@ -5118,13 +5119,24 @@ def institution_save():
         dest=UPLOAD_DIR/"institution"; dest.mkdir(exist_ok=True); fname=secure_filename(image.filename); out=dest/f"{uuid.uuid4().hex}-{fname}"; image.save(out); image_path="uploads/institution/"+out.name
     # Remove media explicitly marked by the editor, then attach new images/videos.
     try:
-        removed_by_section=json.loads(request.form.get("about_remove_media", "{}") or "{}")
-        if not isinstance(removed_by_section, dict): removed_by_section={}
+        raw_removed=json.loads(request.form.get("about_remove_media", "[]") or "[]")
+        # New editor sends a flat path list so section reordering cannot make
+        # removals point at the wrong image. Keep accepting the older indexed
+        # dictionary format for backward compatibility.
+        if isinstance(raw_removed, list):
+            removed_global={str(x) for x in raw_removed if str(x).strip()}
+            removed_by_section={}
+        elif isinstance(raw_removed, dict):
+            removed_global=set()
+            removed_by_section={str(k): set(str(x) for x in (v or []) if str(x).strip()) for k,v in raw_removed.items()}
+            for values in removed_by_section.values(): removed_global.update(values)
+        else:
+            removed_global=set(); removed_by_section={}
     except Exception:
-        removed_by_section={}
+        removed_global=set(); removed_by_section={}
     for i,item in enumerate(about_sections):
         media=list(item.get("media",[]))
-        removed=set(str(x) for x in (removed_by_section.get(str(i), []) or []) if str(x).strip())
+        removed=set(removed_by_section.get(str(i), set())) | removed_global
         if removed:
             kept=[]
             for m in media:
@@ -6063,6 +6075,13 @@ def save_settings():
     return redirect(url_for("admin_dashboard"))
 
 
+def parse_money_input(raw, default=None):
+    """Accept normal human money entry such as 14,000 / 14000 / 14 000.00."""
+    value=str(raw or '').strip().replace(',', '').replace(' ', '')
+    if value=='': return default
+    try: return float(value)
+    except (TypeError,ValueError): return None
+
 @app.route("/admin/students/add", methods=["GET", "POST"])
 @login_required
 @role_required("Admin")
@@ -6098,24 +6117,18 @@ def add_student():
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     if fee_override:
-        try:
-            manual_fee=float(fee_override)
-            if manual_fee < 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            flash("The exact fee total must be a valid amount of 0 or more. Example: 18500 or 18500.00. The student was not submitted.", "danger")
+        manual_fee=parse_money_input(fee_override)
+        if manual_fee is None or manual_fee < 0:
+            flash("The exact fee total must be a valid amount of 0 or more. You can type 14,000 or 14000.00. The student was not submitted.", "danger")
             return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     if uses_bus and not transport_zone:
         flash("School bus is set to Yes, but no transport zone was selected. Choose a transport zone or change School bus to No. The student was not submitted.", "danger")
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
-    try:
-        meal_charge_value=float(request.form.get('meal_charge','0') or 0)
-        if meal_charge_value < 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        flash("Meal charge must be a valid amount of 0 or more, or leave it at 0 when meals are not being charged. The student was not submitted.", "danger")
+    meal_charge_value=parse_money_input(request.form.get('meal_charge','0'), default=0.0)
+    if meal_charge_value is None or meal_charge_value < 0:
+        flash("Meal charge must be a valid amount of 0 or more. You can type commas normally, e.g. 3,500.", "danger")
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     settings = school_settings()
@@ -6131,7 +6144,7 @@ def add_student():
         return redirect(url_for("admin_dashboard") + "#admin-add-student")
 
     fee = float(settings["school_fee"] or 0)
-    manual_fee=float(fee_override) if fee_override else None
+    manual_fee=parse_money_input(fee_override) if fee_override else None
     if manual_fee is not None:
         fee=manual_fee
     transport_charge=0.0
@@ -6868,20 +6881,13 @@ def add_user():
     username=request.form.get("username", "").strip().lower()
     password=request.form.get("password", "")
     role=request.form.get("role", "Teacher")
-    if role == "Support Staff":
-        role = "Teacher"
-        request_workspace = request.form.get("workspace_type", "Other Staff").strip() or "Other Staff"
-        if request_workspace == "Teaching":
-            request_workspace = "Other Staff"
-    else:
-        request_workspace = request.form.get("workspace_type", "Teaching").strip() or "Teaching"
     if role in {"Student", "Parent", "System"}:
         flash("Student and parent records are not staff accounts. Use the administrator-only student intake.", "warning")
         return redirect(request.referrer or url_for("admin_dashboard"))
     title=request.form.get("title", "").strip()
     leadership_role=request.form.get("leadership_role", "").strip()
     department=request.form.get("department", "").strip()
-    workspace_type=request_workspace
+    workspace_type=request.form.get("workspace_type", "Teaching").strip() or "Teaching"
     if workspace_type not in {"Teaching","Driver","Reception","Guard","Cook","Other Staff"}: workspace_type="Teaching"
     student_id=request.form.get("student_id") or None
     allowed=set(ALL_PORTAL_ROLES) - {SYSTEM_ROLE, "Student", "Parent"}
@@ -6938,6 +6944,64 @@ def admin_access_user(user_id: int):
     return redirect(target + "?" + urllib.parse.urlencode({"portal_context": context}))
 
 
+@app.route("/admin/people/reconcile", methods=["GET"])
+@login_required
+@role_required("Admin")
+def people_reconcile():
+    staff_rows=q("""SELECT u.id,u.full_name,u.username,u.role,u.workspace_type,u.student_id,u.title,u.department,
+                           COALESCE(s1.id,s2.id) AS matched_student_id,COALESCE(s1.admission_no,s2.admission_no) AS matched_admission,
+                           COALESCE(s1.grade,s2.grade) AS matched_grade,COALESCE(s1.full_name,s2.full_name) AS matched_student_name
+                    FROM users u
+                    LEFT JOIN students s1 ON s1.id=u.student_id AND s1.active=1
+                    LEFT JOIN students s2 ON s2.active=1 AND lower(trim(s2.full_name))=lower(trim(u.full_name))
+                    WHERE u.active=1 AND u.role NOT IN ('Student','Parent','System')
+                      AND (u.student_id IS NOT NULL OR s2.id IS NOT NULL)
+                    ORDER BY u.full_name""")
+    learner_rows=q("""SELECT u.id AS user_id,u.full_name,u.username,u.role,u.student_id,s.admission_no,s.grade
+                     FROM users u JOIN students s ON s.id=u.student_id
+                     WHERE u.active=1 AND u.role='Student' AND s.active=1 ORDER BY u.full_name""")
+    return render_template('people_reconcile.html',settings=school_settings(),actor_name=current_user()['full_name'],staff_rows=staff_rows,learner_rows=learner_rows)
+
+@app.route("/admin/people/reconcile/staff-to-student", methods=["POST"])
+@login_required
+@role_required("Admin")
+def reconcile_staff_to_student():
+    ids=[]
+    for raw in request.form.getlist('user_ids'):
+        try: ids.append(int(raw))
+        except (TypeError,ValueError): pass
+    moved=0; skipped=0
+    for uid in dict.fromkeys(ids):
+        u=q("SELECT * FROM users WHERE id=? AND active=1 AND role NOT IN ('Student','Parent','System')",(uid,),one=True)
+        if not u: skipped+=1; continue
+        st=q("SELECT id FROM students WHERE id=? AND active=1",(u['student_id'],),one=True) if u['student_id'] else q("SELECT id FROM students WHERE active=1 AND lower(trim(full_name))=lower(trim(?)) ORDER BY id DESC LIMIT 1",(u['full_name'],),one=True)
+        if not st: skipped+=1; continue
+        execute("UPDATE users SET role='Student',workspace_type='Student',student_id=?,title='Student',leadership_role='',leadership_level=0,reception_enabled=0 WHERE id=?",(st['id'],uid))
+        moved+=1
+    audit(current_user()['id'],current_user()['full_name'],'Bulk people reconciliation',f'Moved {moved} staff account(s) to matched learner account type; skipped {skipped}.')
+    flash(f'Moved {moved} matched staff account(s) to Students.' + (f' {skipped} skipped because no learner match was found.' if skipped else ''),'success' if moved else 'warning')
+    return redirect(url_for('people_reconcile'))
+
+@app.route("/admin/people/reconcile/student-to-staff", methods=["POST"])
+@login_required
+@role_required("Admin")
+def reconcile_student_to_staff():
+    ids=[]
+    for raw in request.form.getlist('user_ids'):
+        try: ids.append(int(raw))
+        except (TypeError,ValueError): pass
+    workspace=(request.form.get('workspace_type') or 'Teaching').strip()
+    if workspace not in {'Teaching','Driver','Reception','Guard','Cook','Other Staff'}: workspace='Teaching'
+    moved=0
+    for uid in dict.fromkeys(ids):
+        u=q("SELECT id,full_name,role FROM users WHERE id=? AND active=1 AND role='Student'",(uid,),one=True)
+        if not u: continue
+        execute("UPDATE users SET role='Teacher',workspace_type=?,student_id=NULL,title=?,leadership_role='',leadership_level=0,reception_enabled=? WHERE id=?",(workspace,('Teacher' if workspace=='Teaching' else workspace),1 if workspace=='Reception' else 0,uid))
+        moved+=1
+    audit(current_user()['id'],current_user()['full_name'],'Bulk people reconciliation',f'Moved {moved} student login account(s) into {workspace} staff workspace.')
+    flash(f'Moved {moved} account(s) into {workspace}. The learner records themselves were kept intact for audit/history.','success' if moved else 'warning')
+    return redirect(url_for('people_reconcile'))
+
 @app.route("/users/<int:user_id>/edit", methods=["GET","POST"])
 @login_required
 def edit_user(user_id:int):
@@ -6948,16 +7012,10 @@ def edit_user(user_id:int):
     if actor["role"]=="ICT" and user["role"] in {"Admin","ICT"}: abort(403)
     if request.method=="POST":
         role=request.form.get("role",user["role"])
-        if role == "Support Staff":
-            role = "Teacher"
-            submitted_workspace = request.form.get("workspace_type", "Other Staff").strip() or "Other Staff"
-            if submitted_workspace == "Teaching": submitted_workspace = "Other Staff"
-        else:
-            submitted_workspace = request.form.get("workspace_type", user["workspace_type"] if "workspace_type" in user.keys() else "Teaching").strip() or "Teaching"
         if user["id"] == actor["id"] and role != actor["role"]:
             flash("The currently signed-in Administrator account cannot be changed into another role. Create or edit another account instead.", "warning")
             return redirect(url_for("edit_user", user_id=user_id))
-        workspace_type=submitted_workspace
+        workspace_type=request.form.get("workspace_type", user["workspace_type"] if "workspace_type" in user.keys() else "Teaching").strip() or "Teaching"
         if workspace_type not in {"Teaching","Driver","Reception","Guard","Cook","Other Staff"}: workspace_type="Teaching"
         if actor["role"]=="ICT" and role in {"Admin","ICT"}: abort(403)
         if role not in set(ALL_PORTAL_ROLES)-{SYSTEM_ROLE, "Student"}: abort(400)
@@ -6985,8 +7043,7 @@ def edit_user(user_id:int):
         return redirect(url_for("admin_dashboard"))
     students=q("SELECT id, full_name, admission_no FROM students WHERE active=1 ORDER BY full_name")
     depts=q("SELECT name FROM departments WHERE active=1 ORDER BY name")
-    profile_role = "Support Staff" if user["role"] == "Teacher" and (user["workspace_type"] or "Teaching") == "Other Staff" else user["role"]
-    return render_template("user_edit.html", user=user, students=students, departments=depts, role_options=("Admin","ICT","Finance","Teacher","Support Staff","Librarian","Driver","Parent"), profile_role=profile_role, guardian_links=q("SELECT * FROM guardian_links WHERE guardian_user_id=? AND active=1",(user_id,)))
+    return render_template("user_edit.html", user=user, students=students, departments=depts, role_options=tuple(r for r in ALL_PORTAL_ROLES if r != "Student"), guardian_links=q("SELECT * FROM guardian_links WHERE guardian_user_id=? AND active=1",(user_id,)))
 
 @app.route("/users/<int:user_id>/reset-password", methods=["POST"])
 @login_required
@@ -7281,6 +7338,8 @@ def all_employees():
     for r in rows:
         r['check_in_local']=_local_iso(_parse_stored_event(r.get('check_in_at'))) if r.get('check_in_at') else None
         r['check_out_local']=_local_iso(_parse_stored_event(r.get('check_out_at'))) if r.get('check_out_at') else None
+        wt=str(r.get('workspace_type') or '').strip()
+        r['employee_category'] = (wt if wt and wt!='Teaching' else ('Teacher' if r.get('role')=='Teacher' else r.get('role')))
     return render_template("directory.html", directory_type="Employees", rows=rows, settings=school_settings(), role=current_user()["role"], actor_name=current_user()["full_name"], guardian_map={}, today=today, add_mode=bool(request.args.get("add")), all_roles=ALL_PORTAL_ROLES, departments=q("SELECT id,name,category FROM departments WHERE active=1 ORDER BY name"))
 
 @app.route("/users/<int:user_id>/qr")
@@ -7456,54 +7515,68 @@ def client_system_error():
     data=request.get_json(silent=True) or {}
     if not isinstance(data,dict): data={}
     message=str(data.get('message') or 'Browser-reported error')[:5000]
-    status=int(data.get('status_code') or 0) if str(data.get('status_code') or '').isdigit() else 0
-    rid=record_system_error(source='browser', message=message, status_code=status, level=str(data.get('level') or 'ERROR')[:20], request_id=data.get('request_id'), client_context=data.get('client_context') or data.get('context') or '', error=None)
+    raw_status=str(data.get('status_code') or '')
+    status=int(raw_status) if raw_status.isdigit() else 0
+    context=str(data.get('client_context') or data.get('context') or '')[:12000]
+    stack=str(data.get('stack') or '')[:30000]
+    if stack: context=(context+'\nCLIENT STACK:\n'+stack).strip()[:15000]
+    rid=record_system_error(source='browser',message=message,status_code=status,level=str(data.get('level') or 'ERROR')[:20],request_id=data.get('request_id'),client_context=context,traceback_text=stack)
     return jsonify({'ok':True,'request_id':rid})
 
+
+def _read_system_errors(day='', limit=500):
+    """Merge DB diagnostics with the durable archive without creating duplicate request entries."""
+    valid_day=day if re.fullmatch(r'\d{4}-\d{2}-\d{2}',day or '') else ''
+    try:
+        where='WHERE substr(created_at,1,10)=?' if valid_day else ''
+        params=[valid_day] if valid_day else []
+        sql=f"""SELECT id,created_at,level,source,method,path,endpoint,status_code,user_id,username,role,message,exception_type,traceback,user_agent,request_id,client_context
+                   FROM system_errors {where} ORDER BY created_at DESC,id DESC"""
+        rows=[dict(r) for r in q(sql,tuple(params))]
+    except Exception as exc:
+        record_system_error(source='server',message='System error ledger could not be read from SQLite',error=exc,status_code=500)
+        rows=[]
+    seen={(str(r.get('request_id') or ''),str(r.get('created_at') or ''),str(r.get('message') or '')) for r in rows if r.get('request_id')}
+    for archive_name in ('system-errors-archive.jsonl','system-errors.jsonl'):
+        archive=DATA_DIR/archive_name
+        if not archive.exists(): continue
+        try:
+            with archive.open('r',encoding='utf-8',errors='replace') as fh:
+                for line in fh:
+                    try: item=json.loads(line)
+                    except Exception: continue
+                    created=str(item.get('created_at',''))
+                    if valid_day and not created.startswith(valid_day): continue
+                    key=(str(item.get('request_id') or ''),created,str(item.get('message') or ''))
+                    if item.get('request_id') and key in seen: continue
+                    if item.get('request_id'): seen.add(key)
+                    item.setdefault('source','archive'); item.setdefault('level','ERROR'); item.setdefault('status_code',0)
+                    item['id']='archive-'+str(len(rows)+1)
+                    rows.append(item)
+        except OSError:
+            continue
+    rows.sort(key=lambda x:(str(x.get('created_at','')),str(x.get('id',''))),reverse=True)
+    return rows if limit is None else rows[:max(1,int(limit))]
 
 @app.route('/admin/errors')
 @login_required
 @admin_root_required
 def admin_errors():
-    return render_template('admin_errors.html', settings=school_settings(), actor_name=admin_root_user()['full_name'])
-
+    day=(request.args.get('day') or '').strip()
+    rows=_read_system_errors(day=day,limit=500)
+    return render_template('admin_errors.html',settings=school_settings(),actor_name=admin_root_user()['full_name'],rows=rows,selected_day=day)
 
 @app.route('/admin/errors/data')
 @login_required
 @admin_root_required
 def admin_errors_data():
     day=(request.args.get('day') or '').strip()
-    raw_limit=(request.args.get('limit') or '500').strip().lower()
-    limit=None if raw_limit=='all' else min(max(int(raw_limit),1),2000)
-    where=''; params=[]
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}',day):
-        where="WHERE substr(created_at,1,10)=?"; params.append(day)
-    sql=f"""SELECT id,created_at,level,source,method,path,endpoint,status_code,user_id,username,role,message,exception_type,traceback,user_agent,request_id,client_context
-               FROM system_errors {where} ORDER BY created_at DESC,id DESC"""
-    if limit is not None:
-        sql += " LIMIT ?"; params.append(limit)
-    rows=q(sql,tuple(params))
-    combined=[dict(r) for r in rows]
-    fallback=DATA_DIR/'system-errors.jsonl'
-    if fallback.exists():
-        try:
-            extras=[]
-            with fallback.open('r',encoding='utf-8',errors='replace') as fh:
-                for line in fh:
-                    try:
-                        item=json.loads(line)
-                    except Exception:
-                        continue
-                    if day and re.fullmatch(r'\d{4}-\d{2}-\d{2}',day) and not str(item.get('created_at','')).startswith(day):
-                        continue
-                    item.setdefault('source','fallback'); item.setdefault('level','ERROR'); item.setdefault('status_code',0)
-                    item['id']='fallback-'+str(len(extras)+1); extras.append(item)
-            combined.extend(extras)
-            combined.sort(key=lambda x:(str(x.get('created_at','')),str(x.get('id',''))), reverse=True)
-            if limit is not None: combined=combined[:limit]
-        except OSError:
-            pass
-    return jsonify({'ok':True,'rows':combined})
+    raw=(request.args.get('limit') or '500').strip().lower()
+    if raw=='all': limit=None
+    else:
+        try: limit=min(max(int(raw),1),50000)
+        except ValueError: limit=500
+    return jsonify({'ok':True,'rows':_read_system_errors(day=day,limit=limit)})
 
 
 def _full_portal_backup_name(prefix="prime-institution-full-portal"):
@@ -7523,7 +7596,11 @@ def _backup_archive_paths():
         if any(part in excluded_dirs for part in rel.parts):
             continue
         rel_name=rel.as_posix()
+        # Never let a backup archive contain itself or its temporary SQLite snapshot.
+        # Both files live inside DATA_DIR while the ZIP is being constructed.
         if rel_name in {"school.db", "school.db-wal", "school.db-shm"}:
+            continue
+        if path.name.startswith(".full-backup-") or path.name.startswith(".full-db-snapshot-"):
             continue
         if any(str(path).endswith(suffix) for suffix in excluded_suffixes):
             continue
@@ -7570,7 +7647,12 @@ def _create_full_portal_backup_file():
 @login_required
 @admin_root_required
 def backup_download():
-    backup_path=_create_full_portal_backup_file()
+    try:
+        backup_path=_create_full_portal_backup_file()
+    except Exception as exc:
+        record_system_error(source="server", message=f"Full portal backup creation failed: {exc}", error=exc, status_code=500)
+        flash(f"Full portal backup could not be created: {exc}", "danger")
+        return redirect(request.referrer or url_for("admin_dashboard"))
     name=_full_portal_backup_name()
     @after_this_request
     def _cleanup(response):
@@ -7587,7 +7669,25 @@ def backup_download():
 def backup_sqlite_download():
     if not DB_PATH.exists():
         abort(404)
-    return send_file(DB_PATH,as_attachment=True,download_name="school_backup.sqlite3")
+    snapshot=DATA_DIR / f".download-db-{uuid.uuid4().hex}.sqlite3"
+    try:
+        source=sqlite3.connect(DB_PATH, timeout=30)
+        try:
+            with sqlite3.connect(snapshot, timeout=30) as dest:
+                source.backup(dest)
+        finally:
+            source.close()
+        @after_this_request
+        def _cleanup(response):
+            try: snapshot.unlink(missing_ok=True)
+            except OSError: pass
+            return response
+        return send_file(snapshot,as_attachment=True,download_name="school_backup.sqlite3",mimetype="application/vnd.sqlite3")
+    except Exception as exc:
+        snapshot.unlink(missing_ok=True)
+        record_system_error(source="server", message=f"SQLite backup download failed: {exc}", error=exc, status_code=500)
+        flash(f"SQLite backup could not be created: {exc}", "danger")
+        return redirect(request.referrer or url_for("admin_dashboard"))
 
 
 def _validate_full_backup_zip(file_storage):

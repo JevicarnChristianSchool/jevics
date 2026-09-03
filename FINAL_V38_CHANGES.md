@@ -13,3 +13,13 @@ Implemented in this build:
 - Final phone CSS removes the public landing-page Menu button, keeps large top navigation controls and a left-side navigation rail, increases mobile readability and touch-target sizing, and prevents horizontal overflow. Authenticated pages also receive larger mobile controls and cleaner one-column layouts.
 
 Note: runtime integration testing could not be executed in this container because the uploaded project dependencies (including Flask) are not installed here. Python syntax compilation of `app.py` completed successfully.
+
+## V2 diagnostic follow-up — attendance live 500
+2026-09-03: Fixed `/admin/attendance/live`. The SQL query contained 12 placeholders but only 10 bound parameters, causing repeated HTTP 500s during the dashboard's 5-second live attendance refresh. The parameter tuple now supplies all six start/end pairs. The exact query was replayed against the bundled school database successfully after the fix.
+
+## V4 backup reliability patch — 2026-09-03
+- Fixed full ZIP backup construction so the temporary ZIP cannot archive itself while it is being written.
+- Fixed full ZIP archive enumeration so temporary SQLite snapshot files are excluded.
+- Full portal backup creation failures are now recorded in the persistent system-error ledger and surfaced to the admin instead of becoming an unexplained 500.
+- Changed SQLite backup download to use SQLite's transaction-consistent backup API, so WAL-mode changes are included in the downloaded rollback copy.
+- SQLite backup download failures are now recorded in the persistent system-error ledger and surfaced to the admin.

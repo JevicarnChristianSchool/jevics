@@ -4,6 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store">
   <title>{{ school_settings.school_name }} | Admin Command Centre</title>
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="{{ theme_color }}">
@@ -93,7 +94,7 @@
         <div class="admin-qr-box"><div class="eyebrow">Staff QR</div><img src="/admin/attendance/qr" alt="Institution staff attendance QR"><strong>Scan to sign in / sign out</strong><span class="muted small">Every scan is recorded against the staff account currently signed in on the scanning device.</span></div>
       </div>
       <div class="today-attendance-card fast-review-home">
-        <div class="panel-head"><div><div class="eyebrow">Fast review</div><h3>Today’s staff status</h3></div><span class="muted small">One source: account attendance</span></div>
+        <div class="panel-head"><div><div class="eyebrow">Fast review</div><h3>Today’s staff status</h3></div><span class="muted small" id="attendanceSyncState">Live · account attendance</span></div>
         <div class="table-wrap"><table class="clean-attendance"><thead><tr><th>Name</th><th>Account role</th><th>Check-in</th><th>Check-out</th><th>Location</th><th>Capture</th><th>Status</th></tr></thead><tbody id="liveStaffRegisterBody">{% for a in today_attendance %}<tr>
 <td><strong>{{a.full_name}}</strong>{% if a.staff_code %}<div class="muted small">{{a.staff_code}}</div>{% endif %}</td>
 <td>{{a.staff_category or a.role}}{% if a.workspace_type %}<div class="muted small">{{a.workspace_type}}</div>{% endif %}</td>
@@ -136,8 +137,10 @@
   let busy=false;
   async function refresh(){
     if(busy||document.hidden)return; busy=true;
-    try{const r=await fetch('/admin/attendance/live',{headers:{'Accept':'application/json'},cache:'no-store'}); const j=await r.json(); if(j.ok)render(j.rows);}
-    catch(e){} finally{busy=false;}
+    const sync=document.getElementById('attendanceSyncState');
+    try{const r=await fetch('/admin/attendance/live?t='+Date.now(),{headers:{'Accept':'application/json','Cache-Control':'no-cache'},cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); const j=await r.json(); if(j.ok){render(j.rows); if(sync)sync.textContent='Live · updated '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}}
+    catch(e){if(sync)sync.textContent='Live · refresh unavailable';}
+    finally{busy=false;}
   }
   refresh();
   window.setInterval(refresh,5000);

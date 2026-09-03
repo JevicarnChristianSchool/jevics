@@ -3913,8 +3913,10 @@ def reception_face_verify():
         matched_user=q("SELECT * FROM users WHERE student_id=? AND active=1 AND role='Student' ORDER BY id LIMIT 1",(best['sid'],),one=True)
     if not matched_user: return jsonify({'ok':False,'message':'The recognized person has no active system account.'}),403
     now=datetime.utcnow().isoformat(timespec='seconds')
-    execute("INSERT INTO attendance_events(user_id,action,method,event_at,source,device_note) VALUES(?,?,?,?,?,?)",(matched_user['id'],action, 'Face recognition', now,'online',f'face-distance={best_dist:.4f}'))
-    return jsonify({'ok':True,'name':matched_user['full_name'],'action':action,'event_at':now,'message':f'{matched_user["full_name"]} checked {"in" if action=="IN" else "out"} successfully.'})
+    result=record_account_attendance(matched_user,action,now,'online','Face recognition',None,None,None,f'face-distance={best_dist:.4f}','')
+    if not result.get('ok'):
+        return jsonify(result),409
+    return jsonify({'ok':True,'name':matched_user['full_name'],'action':action,'event_at':result['event_at'],'message':result['message']})
 
 @app.route("/reception/face/profiles")
 @login_required
@@ -4084,7 +4086,7 @@ def record_account_attendance(user,action,event_at=None,source='online',method='
         note += ' Browser: ' + re.sub(r'\s+',' ',ua)[:220]
     execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(user['id'],action,method,'',stamp,source,latitude,longitude,accuracy,None,note,location_label))
     position=user['title'] or user['role'] or 'Staff'
-    notify_users(attendance_admin_ids(),f'Attendance: {user["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{user["full_name"]} ({position}) checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {location_label or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
+    notify_users(attendance_admin_ids(),f'Attendance: {user["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{user["full_name"]} ({position}) checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {location_label or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_dashboard')+'#admin-overview-panel')
     return {'ok':True,'message':f'{user["full_name"]} checked {"in" if action=="IN" else "out"}.','action':action,'event_at':stamp,'location_label':location_label,'dashboard':specialized_dashboard_for(user)}
 
 @app.route("/attendance")
@@ -4230,9 +4232,14 @@ def admin_attendance_live():
         item['sign_in_local']=_local_iso(_parse_stored_event(item['sign_in_at'])) if item.get('sign_in_at') else None
         item['sign_out_local']=_local_iso(_parse_stored_event(item['sign_out_at'])) if item.get('sign_out_at') else None
         item['status_label'] = ('OUT' if item.get('sign_out_at') else 'IN') if item.get('sign_in_at') else ('Missed' if day_closed else 'Not signed in')
+        item['location_display']=item.get('location') or ((f"{float(item['latitude']):.5f}, {float(item['longitude']):.5f}") if item.get('latitude') is not None and item.get('longitude') is not None else 'Not captured')
+        item['capture_display']=item.get('device_note') or 'Device details not captured'
+        item['account_role_label']=item.get('staff_category') or item.get('role') or 'Staff'
         # Role/category comes from the employee account; never infer it from the scanner/admin account.
         out.append(item)
-    return jsonify({'ok':True,'date':local_today,'rows':out})
+    response=jsonify({'ok':True,'date':local_today,'rows':out})
+    response.headers['Cache-Control']='no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 @app.route('/admin/attendance/manual', methods=['POST'])
 @login_required
@@ -4253,7 +4260,7 @@ def admin_manual_attendance():
         return redirect(url_for('admin_dashboard'))
     result=record_account_attendance(target,action,stamp,'manual','Manual',None,None,None,note,location_label)
     if result.get('ok'):
-        notify_users(attendance_admin_ids(),f'Attendance: {target["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'Manual attendance recorded for {target["full_name"]}. Location: {location_label or "Not supplied"}.',url_for('admin_attendance'))
+        notify_users(attendance_admin_ids(),f'Attendance: {target["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'Manual attendance recorded for {target["full_name"]}. Location: {location_label or "Not supplied"}.',url_for('admin_dashboard')+'#admin-overview-panel')
         flash(f'{target["full_name"]} marked {"in" if action=="IN" else "out"}.','success')
     else:
         flash(result.get('message','Attendance could not be recorded.'),'danger')
@@ -7722,7 +7729,7 @@ def admin_errors():
     except Exception as exc:
         record_system_error(source='server', message='Admin diagnostics page could not load school settings', error=exc, status_code=500)
         settings={'school_name':'School Portal System'}
-    return render_template('admin_errors.html',settings=settings,actor_name=(actor['full_name'] if actor else 'Administrator'),rows=rows,selected_day=day)
+    return render_template('admin_errors.html',settings=settings,actor_name=(actor['full_name'] if actor else 'Administrator'),rows=rows,rows_json=json.dumps(rows,ensure_ascii=False,default=str),selected_day=day)
 
 @app.route('/admin/errors/data')
 @login_required

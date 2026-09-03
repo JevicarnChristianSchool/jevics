@@ -191,3 +191,6 @@ body.app-body .panel .topbar-subtitle{color:var(--muted-text,#6f6f6a)}
     color:#111111!important;
   }
 }
+
+/* V9 role workspace density */
+body.role-ui:not(.role-admin) .content{max-width:1400px;} body.role-ui:not(.role-admin) .panel{margin-bottom:14px;} body.role-ui:not(.role-admin) .stats-grid{gap:12px;} body.role-ui:not(.role-admin) .mini-card{min-width:0;}

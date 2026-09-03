@@ -1325,6 +1325,7 @@ def _init_db_once() -> None:
         ensure_column(conn, "class_sessions", "library_item_id INTEGER")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_compulsory_subjects_class ON compulsory_subjects(class_name,active)")
         ensure_column(conn, "users", "workspace_type TEXT NOT NULL DEFAULT 'Teaching'")
+        ensure_column(conn, "users", "staff_category TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "offline_enabled INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "school_settings", "backup_reminder_time TEXT NOT NULL DEFAULT '16:00'")
         ensure_column(conn, "school_settings", "backup_auto_time TEXT NOT NULL DEFAULT '16:30'")
@@ -1340,6 +1341,7 @@ def _init_db_once() -> None:
         conn.execute("""CREATE TABLE IF NOT EXISTS theme_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_type TEXT NOT NULL, settings_json TEXT NOT NULL, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)""")
         conn.execute("INSERT OR IGNORE INTO finance_accounts(id, account_name, opening_balance) VALUES(1, 'Institution Operating Account', 0)")
         conn.execute("UPDATE users SET qr_access_token=lower(hex(randomblob(16))) WHERE role!='System' AND (qr_access_token IS NULL OR qr_access_token='')")
+        conn.execute("UPDATE users SET staff_category=CASE WHEN COALESCE(staff_category,'')!='' THEN staff_category WHEN workspace_type IN ('Driver','Reception','Guard','Cook','Other Staff') THEN 'Support Staff' WHEN role='Teacher' THEN 'Teaching Staff' ELSE role END WHERE role!='System'")
         conn.execute("UPDATE users SET qr_login_enabled=0 WHERE qr_login_enabled IS NULL")
         conn.execute("UPDATE users SET qr_login_enabled=1 WHERE active=1 AND role IN ('Admin','ICT','Finance','Teacher','Librarian','Driver') AND qr_access_token IS NOT NULL AND qr_access_token!=''")
         if conn.execute("SELECT COUNT(*) FROM system_help").fetchone()[0] == 0:
@@ -2164,6 +2166,21 @@ def staff_code_for(user_role: str, workspace_type: str) -> str:
     prefix={"Teacher":"TCH","Driver":"DRV","Reception":"REC","Guard":"SEC","Cook":"CAT","Finance":"FIN","ICT":"ICT","Librarian":"LIB","Admin":"ADM"}.get(workspace_type if workspace_type in {"Driver","Reception","Guard","Cook"} else user_role,"STF")
     row=q("SELECT COUNT(*) AS c FROM users WHERE staff_code LIKE ?",(prefix+"-%",),one=True)
     return f"{prefix}-{int(row['c'] or 0)+1:03d}"
+
+def staff_category_for(user):
+    """Human-facing workforce category; stored role remains the security boundary."""
+    if not user:
+        return ''
+    explicit = str((user['staff_category'] if 'staff_category' in user.keys() else '') or '').strip()
+    if explicit:
+        return explicit
+    wt = str((user['workspace_type'] if 'workspace_type' in user.keys() else '') or '').strip()
+    role = str((user['role'] if 'role' in user.keys() else '') or '').strip()
+    if wt in {'Driver','Reception','Guard','Cook','Other Staff'}:
+        return 'Support Staff'
+    if role == 'Teacher':
+        return 'Teaching Staff'
+    return role or 'Staff'
 
 def resolve_staff_token(raw_token: str):
     token=(raw_token or '').strip()
@@ -3996,7 +4013,15 @@ def record_account_attendance(user,action,event_at=None,source='online',method='
             pass
     if attendance_day_is_closed(stamp): return {'ok':False,'message':f'Attendance for {attendance_date_from_value(stamp)} is closed by the school.','closed':True}
     location_label=_attendance_event_location(latitude,longitude,location_label)
-    execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(user['id'],action,method,'',stamp,source,latitude,longitude,accuracy,None,device_note,location_label))
+    note=str(device_note or '').strip()[:500]
+    if latitude is None or longitude is None:
+        note = ((note + ' · ') if note else '') + 'Location not captured by client.'
+    if not note or note.strip() in {'staff-qr','phone-camera'}:
+        note = ((note + ' · ') if note else '') + 'Device details were not supplied by client.'
+    ua=(request.headers.get('User-Agent') or '').strip()
+    if ua and 'Browser:' not in note:
+        note += ' Browser: ' + re.sub(r'\s+',' ',ua)[:220]
+    execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(user['id'],action,method,'',stamp,source,latitude,longitude,accuracy,None,note,location_label))
     position=user['title'] or user['role'] or 'Staff'
     notify_users(attendance_admin_ids(),f'Attendance: {user["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{user["full_name"]} ({position}) checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {location_label or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
     return {'ok':True,'message':f'{user["full_name"]} checked {"in" if action=="IN" else "out"}.','action':action,'event_at':stamp,'location_label':location_label,'dashboard':specialized_dashboard_for(user)}
@@ -6880,7 +6905,10 @@ def add_user():
     full_name=request.form.get("full_name", "").strip()
     username=request.form.get("username", "").strip().lower()
     password=request.form.get("password", "")
+    account_type=request.form.get("account_type", "").strip()
     role=request.form.get("role", "Teacher")
+    if account_type in {"Support Staff","Leadership","Teaching Staff"}: role="Teacher"
+    elif account_type in {"Librarian","Finance","ICT"}: role=account_type
     if role in {"Student", "Parent", "System"}:
         flash("Student and parent records are not staff accounts. Use the administrator-only student intake.", "warning")
         return redirect(request.referrer or url_for("admin_dashboard"))
@@ -6889,6 +6917,9 @@ def add_user():
     department=request.form.get("department", "").strip()
     workspace_type=request.form.get("workspace_type", "Teaching").strip() or "Teaching"
     if workspace_type not in {"Teaching","Driver","Reception","Guard","Cook","Other Staff"}: workspace_type="Teaching"
+    staff_category=request.form.get("staff_category", "").strip()
+    if not staff_category and account_type in {"Support Staff","Leadership","Teaching Staff"}: staff_category=account_type
+    if not staff_category: staff_category=("Support Staff" if workspace_type in {"Driver","Reception","Guard","Cook","Other Staff"} else ("Teaching Staff" if role=="Teacher" else role))
     student_id=request.form.get("student_id") or None
     allowed=set(ALL_PORTAL_ROLES) - {SYSTEM_ROLE, "Student", "Parent"}
     # ICT is a technical operator, not a privilege escalator.
@@ -6907,9 +6938,9 @@ def add_user():
         school_location=request.form.get("school_location","").strip()
         position_code=staff_code_for(role, workspace_type) if role not in {"Student","Parent","System"} else ""
         reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
-        uid=execute("""INSERT INTO users(full_name, username, password_hash, role, student_id, active, title, department, phone, email, date_of_birth, gender, id_reference, address, emergency_contact, blood_group, medical_notes, accountability_notes, workspace_type, school_unit, school_location, reception_enabled, position_code, staff_code, qr_access_token, qr_login_enabled)
+        uid=execute("""INSERT INTO users(full_name, username, password_hash, role, student_id, active, title, department, phone, email, date_of_birth, gender, id_reference, address, emergency_contact, blood_group, medical_notes, accountability_notes, workspace_type, staff_category, school_unit, school_location, reception_enabled, position_code, staff_code, qr_access_token, qr_login_enabled)
                       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 1)""",
-                   (full_name,username,generate_password_hash(password),role,student_id,title,department,request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,school_unit,school_location,reception_enabled,position_code,position_code))
+                   (full_name,username,generate_password_hash(password),role,student_id,title,department,request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,staff_category,school_unit,school_location,reception_enabled,position_code,position_code))
         if leadership_role and role not in {"Student","Parent","System"}:
             execute("UPDATE users SET leadership_role=?,leadership_level=? WHERE id=?",(leadership_role,1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0,uid))
         audit(actor["id"],actor["full_name"],"Add User",f"{full_name} ({username}) added as {role}; title={title or '—'}; department={department or '—'}.")
@@ -6996,7 +7027,7 @@ def reconcile_student_to_staff():
     for uid in dict.fromkeys(ids):
         u=q("SELECT id,full_name,role FROM users WHERE id=? AND active=1 AND role='Student'",(uid,),one=True)
         if not u: continue
-        execute("UPDATE users SET role='Teacher',workspace_type=?,student_id=NULL,title=?,leadership_role='',leadership_level=0,reception_enabled=? WHERE id=?",(workspace,('Teacher' if workspace=='Teaching' else workspace),1 if workspace=='Reception' else 0,uid))
+        execute("UPDATE users SET role='Teacher',workspace_type=?,staff_category=?,student_id=NULL,title=?,leadership_role='',leadership_level=0,reception_enabled=? WHERE id=?",(workspace,('Teaching Staff' if workspace=='Teaching' else 'Support Staff'),'Teacher' if workspace=='Teaching' else workspace,1 if workspace=='Reception' else 0,uid))
         moved+=1
     audit(current_user()['id'],current_user()['full_name'],'Bulk people reconciliation',f'Moved {moved} student login account(s) into {workspace} staff workspace.')
     flash(f'Moved {moved} account(s) into {workspace}. The learner records themselves were kept intact for audit/history.','success' if moved else 'warning')
@@ -7011,7 +7042,10 @@ def edit_user(user_id:int):
     if not user or user["role"] in {SYSTEM_ROLE, "Student"}: abort(404)
     if actor["role"]=="ICT" and user["role"] in {"Admin","ICT"}: abort(403)
     if request.method=="POST":
+        account_type=request.form.get("account_type", "").strip()
         role=request.form.get("role",user["role"])
+        if account_type in {"Support Staff","Leadership","Teaching Staff"}: role="Teacher"
+        elif account_type in {"Librarian","Finance","ICT"}: role=account_type
         if user["id"] == actor["id"] and role != actor["role"]:
             flash("The currently signed-in Administrator account cannot be changed into another role. Create or edit another account instead.", "warning")
             return redirect(url_for("edit_user", user_id=user_id))
@@ -7032,10 +7066,10 @@ def edit_user(user_id:int):
         if conflict:
             flash("Username already exists. Choose a different username.", "danger")
             return redirect(url_for("edit_user", user_id=user_id))
-        new_title=request.form.get("title","").strip(); leadership_role=request.form.get("leadership_role","").strip(); leadership_level=1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0; school_unit=request.form.get("school_unit","").strip() or school_settings()["school_name"]; school_location=request.form.get("school_location","").strip(); reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
+        new_title=request.form.get("title","").strip(); leadership_role=request.form.get("leadership_role","").strip(); staff_category=request.form.get("staff_category","").strip() or (account_type if account_type in {"Support Staff","Leadership","Teaching Staff"} else ("Support Staff" if workspace_type in {"Driver","Reception","Guard","Cook","Other Staff"} else ("Teaching Staff" if role=="Teacher" else role))); leadership_level=1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0; school_unit=request.form.get("school_unit","").strip() or school_settings()["school_name"]; school_location=request.form.get("school_location","").strip(); reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
         existing_code=user["position_code"] or user["staff_code"] or (staff_code_for(role,workspace_type) if role not in {"Student","Parent","System"} else "")
-        execute("""UPDATE users SET full_name=?, username=?, role=?, student_id=?, title=?, department=?, phone=?, email=?, date_of_birth=?, gender=?, id_reference=?, address=?, emergency_contact=?, blood_group=?, medical_notes=?, accountability_notes=?, workspace_type=?, school_unit=?, school_location=?, leadership_role=?, leadership_level=?, reception_enabled=?, position_code=?, staff_code=? WHERE id=?""",
-               (request.form.get("full_name","").strip(),new_username,role,student_id,new_title,request.form.get("department","").strip(),request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,school_unit,school_location,leadership_role,leadership_level,reception_enabled,existing_code,existing_code,user_id))
+        execute("""UPDATE users SET full_name=?, username=?, role=?, student_id=?, title=?, department=?, phone=?, email=?, date_of_birth=?, gender=?, id_reference=?, address=?, emergency_contact=?, blood_group=?, medical_notes=?, accountability_notes=?, workspace_type=?, staff_category=?, school_unit=?, school_location=?, leadership_role=?, leadership_level=?, reception_enabled=?, position_code=?, staff_code=? WHERE id=?""",
+               (request.form.get("full_name","").strip(),new_username,role,student_id,new_title,request.form.get("department","").strip(),request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,staff_category,school_unit,school_location,leadership_role,leadership_level,reception_enabled,existing_code,existing_code,user_id))
         if role=="Parent" and student_id:
             execute("INSERT OR IGNORE INTO guardian_links(guardian_user_id,student_id,relationship,is_primary) VALUES(?,?,?,?)",(user_id,student_id,request.form.get("relationship","Guardian").strip() or "Guardian",1))
         audit(actor["id"],actor["full_name"],"Edit User",f"Updated {user['username']} ({user['role']}) -> {request.form.get('username','').strip()} ({role}).")
@@ -7325,22 +7359,35 @@ def all_learners():
 @login_required
 @role_required("Admin","ICT")
 def all_employees():
-    today=(datetime.utcnow()+KENYA_TZ_OFFSET).date().isoformat()
+    today=_local_now_naive().date().isoformat()
     start_utc,end_utc=attendance_day_bounds_utc(today)
     rows=q("""
       SELECT u.*,
         (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS check_in_at,
         (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS check_out_at,
-        (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? AND a.location_label!='' ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS check_in_location
+        (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS check_in_location,
+        (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS check_out_location,
+        (SELECT a.device_note FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS check_in_device,
+        (SELECT a.device_note FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS check_out_device,
+        (SELECT ar.status FROM attendance_absence_requests ar WHERE ar.user_id=u.id AND ar.absence_date=? ORDER BY ar.id DESC LIMIT 1) AS absence_status
       FROM users u WHERE u.role NOT IN ('Student','Parent','System') ORDER BY u.active DESC, u.full_name
-    """,(start_utc,end_utc,start_utc,end_utc,start_utc,end_utc))
+    """,(start_utc,end_utc,start_utc,end_utc,start_utc,end_utc,start_utc,end_utc,start_utc,end_utc,start_utc,end_utc,today))
+    school_day=school_day_status(_local_now_naive().date())
+    day_closed=attendance_day_is_closed(today)
     rows=[dict(r) for r in rows]
     for r in rows:
-        r['check_in_local']=_local_iso(_parse_stored_event(r.get('check_in_at'))) if r.get('check_in_at') else None
-        r['check_out_local']=_local_iso(_parse_stored_event(r.get('check_out_at'))) if r.get('check_out_at') else None
-        wt=str(r.get('workspace_type') or '').strip()
-        r['employee_category'] = (wt if wt and wt!='Teaching' else ('Teacher' if r.get('role')=='Teacher' else r.get('role')))
-    return render_template("directory.html", directory_type="Employees", rows=rows, settings=school_settings(), role=current_user()["role"], actor_name=current_user()["full_name"], guardian_map={}, today=today, add_mode=bool(request.args.get("add")), all_roles=ALL_PORTAL_ROLES, departments=q("SELECT id,name,category FROM departments WHERE active=1 ORDER BY name"))
+        cin=_parse_stored_event(r.get('check_in_at')); cout=_parse_stored_event(r.get('check_out_at'))
+        r['check_in_time']=(cin+KENYA_TZ_OFFSET).strftime('%I:%M %p').lstrip('0') if cin else ''
+        r['check_out_time']=(cout+KENYA_TZ_OFFSET).strftime('%I:%M %p').lstrip('0') if cout else ''
+        r['check_in_local']=_local_iso(cin) if cin else None; r['check_out_local']=_local_iso(cout) if cout else None
+        r['employee_category']=staff_category_for(r)
+        r['employee_kind']=str(r.get('workspace_type') or r.get('role') or 'Staff')
+        r['attendance_capture']='Location captured' if r.get('check_in_location') else ('Not captured — location/device data unavailable' if cin else '—')
+        if cin: r['missed_display']='No'
+        elif str(r.get('absence_status') or '').lower()=='approved': r['missed_display']='Excused'
+        elif day_closed and school_day.get('is_school_day'): r['missed_display']='Yes'
+        else: r['missed_display']='—'
+    return render_template("directory.html",directory_type="Employees",rows=rows,settings=school_settings(),role=current_user()["role"],actor_name=current_user()["full_name"],guardian_map={},today=today,add_mode=bool(request.args.get("add")),all_roles=ALL_PORTAL_ROLES,departments=q("SELECT id,name,category FROM departments WHERE active=1 ORDER BY name"),school_day=school_day)
 
 @app.route("/users/<int:user_id>/qr")
 @login_required

@@ -841,3 +841,19 @@
   body.app-body table{font-size:11px!important}
   body.app-body th,body.app-body td{padding:7px 5px!important}
 }
+
+/* Dashboard polish: role-specific accents with strong readable text on phones. */
+@media(max-width:820px){
+  body.admin-body{background:linear-gradient(180deg,#f4f7fb 0,#eef2f7 42%,#f7f8fa 100%);}
+  body.admin-body .topbar,body.admin-body .panel{background:#fff!important;color:#151a22!important;border-color:rgba(15,23,42,.10)!important;}
+  body.admin-body .btn-ghost{color:#151a22!important;background:#f3f6fa!important;border-color:rgba(15,23,42,.12)!important;}
+  body.admin-body .btn-primary{background:#16243d!important;color:#fff!important;}
+  body.admin-body .muted,body.admin-body .topbar-subtitle{color:#566274!important;}
+  body.role-student{background:linear-gradient(180deg,#fff9ee 0,#f4fbff 55%,#f8f5ff 100%);}
+  body.role-student .topbar{border-top:4px solid #ffb703!important;}
+  body.role-teacher .topbar{border-top:4px solid #3457d5!important;}
+  body.role-parent .topbar{border-top:4px solid #f59e0b!important;}
+  body.role-finance .topbar{border-top:4px solid #16a34a!important;}
+  body.role-ict .topbar{border-top:4px solid #7c3aed!important;}
+  body.role-ui .btn-ghost{color:var(--primary-text,#111)!important;}
+}

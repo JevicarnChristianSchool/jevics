@@ -108,7 +108,7 @@ const samples=[
 ];
 let sections=Array.isArray(initial)?JSON.parse(JSON.stringify(initial)):[];
 if(!sections.length){sections=samples.map(s=>JSON.parse(JSON.stringify(s)));}
-let removedMedia={};
+let removedMedia=[];
 const list=document.getElementById('aboutSectionsList'), index=document.getElementById('aboutIndex'), hidden=document.getElementById('aboutSectionsJson'), removedField=document.getElementById('aboutRemoveMedia'), preview=document.getElementById('draftPreview'), importTarget=document.getElementById('aboutImportTarget');
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function sync(){hidden.value=JSON.stringify(sections);removedField.value=JSON.stringify(removedMedia);renderPreview();renderIndex();}
@@ -119,11 +119,11 @@ function render(){list.innerHTML='';sections.forEach((s,i)=>{s.media=Array.isArr
 <label class="about-field" style="margin-top:15px"><span>Write the full section</span><textarea data-f="body" placeholder="Write as much as this institution needs. You can return later and change any word.">${esc(s.body||'')}</textarea></label>
 <div class="media-zone"><h4>Media attached to this section</h4><p>Add photographs or videos that belong to this exact part of the story. Each starter section already has a clearly labelled placeholder image; remove it and upload the real school media when ready.</p><div class="media-list">${(s.media||[]).map((m,j)=>`<div class="media-item"><${m.kind==='video'?'video controls preload="metadata"':'img src="/'+esc(m.path)+'" alt=""'}></${m.kind==='video'?'video':'img'}><div class="media-item-body"><div class="media-kind">${esc(m.kind)}</div><div style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.path)}">${esc(m.path.split('/').pop())}</div><button type="button" class="media-remove" data-media-index="${j}">Remove this media</button></div></div>`).join('')}</div><div class="media-new"><input type="file" name="about_media_${i}" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov"></div></div>`;
 card.querySelectorAll('[data-f]').forEach(el=>el.addEventListener('input',()=>{sections[i][el.dataset.f]=el.value;card.querySelector('h3').textContent=s.title||'New section';sync();}));
-card.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.a;if(a==='remove'&&!confirm('Delete this section from the public story?'))return;if(a==='remove')sections.splice(i,1);if(a==='up'&&i>0)[sections[i-1],sections[i]]=[sections[i],sections[i-1]];if(a==='down'&&i<sections.length-1)[sections[i+1],sections[i]]=[sections[i],sections[i+1]];render();sync();}));
-card.querySelectorAll('[data-media-index]').forEach(b=>b.addEventListener('click',()=>{const j=Number(b.dataset.mediaIndex),m=s.media[j];if(!m)return;if(confirm('Remove this media from the saved public story?')){if(!removedMedia[i])removedMedia[i]=[];removedMedia[i].push(m.path);sections[i].media.splice(j,1);render();sync();}}));
+card.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.a;if(a==='remove'&&!confirm('Delete this section from the public story?'))return;if(a==='remove'){(s.media||[]).forEach(function(m){if(m.path&&!removedMedia.includes(m.path))removedMedia.push(m.path);});sections.splice(i,1);}if(a==='up'&&i>0)[sections[i-1],sections[i]]=[sections[i],sections[i-1]];if(a==='down'&&i<sections.length-1)[sections[i+1],sections[i]]=[sections[i],sections[i+1]];render();sync();}));
+card.querySelectorAll('[data-media-index]').forEach(b=>b.addEventListener('click',()=>{const j=Number(b.dataset.mediaIndex),m=s.media[j];if(!m)return;if(confirm('Remove this media from the saved public story?')){if(!removedMedia.includes(m.path))removedMedia.push(m.path);sections[i].media.splice(j,1);render();sync();}}));
 list.appendChild(card);});sync();}
 document.getElementById('addAboutSection').addEventListener('click',()=>{sections.push({title:'',body:'',layout:'reading',media:[]});render();document.getElementById('about-card-'+(sections.length-1)).scrollIntoView({behavior:'smooth',block:'start'});});
-document.getElementById('loadSample').addEventListener('click',()=>{if(confirm('Load the sample structure? This replaces the editor draft currently on screen. Save only when you are happy with it.')){sections=samples.map(s=>JSON.parse(JSON.stringify(s)));removedMedia={};render();}});
+document.getElementById('loadSample').addEventListener('click',()=>{if(confirm('Load the sample structure? This replaces the editor draft currently on screen. Save only when you are happy with it.')){sections=samples.map(s=>JSON.parse(JSON.stringify(s)));removedMedia=[];render();}});
 render();
 </script>
 </body>

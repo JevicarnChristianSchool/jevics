@@ -1326,6 +1326,25 @@ def _init_db_once() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_compulsory_subjects_class ON compulsory_subjects(class_name,active)")
         ensure_column(conn, "users", "workspace_type TEXT NOT NULL DEFAULT 'Teaching'")
         ensure_column(conn, "users", "staff_category TEXT NOT NULL DEFAULT ''")
+
+        # Diagnostics table is upgraded in-place so older school databases can read
+        # and retain the richer error records introduced by later portal versions.
+        ensure_column(conn, "system_errors", "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        ensure_column(conn, "system_errors", "level TEXT NOT NULL DEFAULT 'ERROR'")
+        ensure_column(conn, "system_errors", "source TEXT NOT NULL DEFAULT 'server'")
+        ensure_column(conn, "system_errors", "method TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "path TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "endpoint TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "status_code INTEGER NOT NULL DEFAULT 500")
+        ensure_column(conn, "system_errors", "user_id INTEGER")
+        ensure_column(conn, "system_errors", "username TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "role TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "message TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "exception_type TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "traceback TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "user_agent TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "request_id TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "system_errors", "client_context TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "school_settings", "offline_enabled INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "school_settings", "backup_reminder_time TEXT NOT NULL DEFAULT '16:00'")
         ensure_column(conn, "school_settings", "backup_auto_time TEXT NOT NULL DEFAULT '16:30'")
@@ -6958,13 +6977,18 @@ def add_user():
         position_code=staff_code_for(role, workspace_type) if role not in {"Student","Parent","System"} else ""
         reception_enabled=1 if workspace_type==RECEPTION_WORKSPACE else 0
         uid=execute("""INSERT INTO users(full_name, username, password_hash, role, student_id, active, title, department, phone, email, date_of_birth, gender, id_reference, address, emergency_contact, blood_group, medical_notes, accountability_notes, workspace_type, staff_category, school_unit, school_location, reception_enabled, position_code, staff_code, qr_access_token, qr_login_enabled)
-                      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 1)""",
+                      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 1)""",
                    (full_name,username,generate_password_hash(password),role,student_id,title,department,request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,staff_category,school_unit,school_location,reception_enabled,position_code,position_code))
         if leadership_role and role not in {"Student","Parent","System"}:
             execute("UPDATE users SET leadership_role=?,leadership_level=? WHERE id=?",(leadership_role,1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0,uid))
         audit(actor["id"],actor["full_name"],"Add User",f"{full_name} ({username}) added as {role}; title={title or '—'}; department={department or '—'}.")
-    except sqlite3.IntegrityError:
-        flash("Username already exists or the supplied learner link is invalid.", "danger")
+    except sqlite3.IntegrityError as exc:
+        record_system_error(source='server', message='Staff account could not be registered because the database rejected the record', error=exc, status_code=400, client_context=f'POST /users/add username={username!r} role={role!r} workspace={workspace_type!r}')
+        flash("The staff account could not be saved. Check the highlighted details and try again.", "danger")
+        return redirect(request.referrer or url_for("admin_dashboard"))
+    except Exception as exc:
+        record_system_error(source='server', message='Unexpected failure while registering a staff account', error=exc, status_code=500, client_context=f'POST /users/add username={username!r} role={role!r} workspace={workspace_type!r}')
+        flash("The staff account was not saved because the server hit an unexpected error. The error has been recorded in System Errors.", "danger")
         return redirect(request.referrer or url_for("admin_dashboard"))
     flash("Account created successfully.", "success")
     return redirect(request.referrer or url_for("admin_dashboard"))
@@ -7595,6 +7619,25 @@ def client_system_error():
 def _read_system_errors(day='', limit=500):
     """Merge DB diagnostics with the durable archive without creating duplicate request entries."""
     valid_day=day if re.fullmatch(r'\d{4}-\d{2}-\d{2}',day or '') else ''
+    # Repair old deployments lazily before selecting the richer schema. This keeps
+    # the Admin error page usable even when the database predates the diagnostics UI.
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            conn.row_factory = sqlite3.Row
+            cols={r[1] for r in conn.execute("PRAGMA table_info(system_errors)").fetchall()}
+            if not cols:
+                conn.execute("CREATE TABLE IF NOT EXISTS system_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, level TEXT NOT NULL DEFAULT 'ERROR', source TEXT NOT NULL DEFAULT 'server', method TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '', endpoint TEXT NOT NULL DEFAULT '', status_code INTEGER NOT NULL DEFAULT 500, user_id INTEGER, username TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', exception_type TEXT NOT NULL DEFAULT '', traceback TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', request_id TEXT NOT NULL DEFAULT '', client_context TEXT NOT NULL DEFAULT '')")
+                conn.commit()
+            else:
+                migrations={
+                    'level':"TEXT NOT NULL DEFAULT 'ERROR'",'source':"TEXT NOT NULL DEFAULT 'server'",'method':"TEXT NOT NULL DEFAULT ''",'path':"TEXT NOT NULL DEFAULT ''",'endpoint':"TEXT NOT NULL DEFAULT ''",'status_code':"INTEGER NOT NULL DEFAULT 500",'user_id':'INTEGER','username':"TEXT NOT NULL DEFAULT ''",'role':"TEXT NOT NULL DEFAULT ''",'message':"TEXT NOT NULL DEFAULT ''",'exception_type':"TEXT NOT NULL DEFAULT ''",'traceback':"TEXT NOT NULL DEFAULT ''",'user_agent':"TEXT NOT NULL DEFAULT ''",'request_id':"TEXT NOT NULL DEFAULT ''",'client_context':"TEXT NOT NULL DEFAULT ''"}
+                for name,definition in migrations.items():
+                    if name not in cols:
+                        conn.execute(f"ALTER TABLE system_errors ADD COLUMN {name} {definition}")
+                conn.commit()
+    except Exception:
+        # The archive below remains usable even if the SQLite file is temporarily unavailable.
+        pass
     try:
         where='WHERE substr(created_at,1,10)=?' if valid_day else ''
         params=[valid_day] if valid_day else []
@@ -7631,8 +7674,19 @@ def _read_system_errors(day='', limit=500):
 @admin_root_required
 def admin_errors():
     day=(request.args.get('day') or '').strip()
-    rows=_read_system_errors(day=day,limit=500)
-    return render_template('admin_errors.html',settings=school_settings(),actor_name=admin_root_user()['full_name'],rows=rows,selected_day=day)
+    try:
+        rows=_read_system_errors(day=day,limit=500)
+    except Exception as exc:
+        # The diagnostics screen must never become the thing that hides the diagnostics.
+        app.logger.exception("System error page failed while loading records: %s", exc)
+        rows=[]
+    actor=admin_root_user() or current_user()
+    try:
+        settings=school_settings()
+    except Exception as exc:
+        record_system_error(source='server', message='Admin diagnostics page could not load school settings', error=exc, status_code=500)
+        settings={'school_name':'School Portal System'}
+    return render_template('admin_errors.html',settings=settings,actor_name=(actor['full_name'] if actor else 'Administrator'),rows=rows,selected_day=day)
 
 @app.route('/admin/errors/data')
 @login_required

@@ -1945,10 +1945,22 @@ def load_current_user() -> None:
                 session["user_id"] = contextual["id"]
                 session["active_portal_role"] = contextual["role"]
             return
+    # A newly authenticated session carries the exact ticket issued at login. If
+    # a stale browser cookie is still present for another account, trust the signed
+    # session identity instead of silently switching the person back to that stale
+    # account. This is especially important on a shared/admin phone used for staff QR.
+    ticket = request.cookies.get(_AUTH_TICKET_COOKIE, "")
+    session_ticket=session.get("auth_ticket")
+    if session.get("user_id") and session_ticket and session_ticket != ticket:
+        session_user=q("SELECT id, full_name, username, role, student_id, active, title, department, leadership_role, leadership_level, workspace_type, school_unit, school_location, position_code, staff_code, reception_enabled, qr_access_token, profile_photo FROM users WHERE id=? AND active=1 AND role!='System'",(session.get("user_id"),),one=True)
+        if session_user:
+            g.user=session_user
+            session.permanent=True
+            g.portal_context=None
+            return
     # Server-backed auth ticket is the primary identity source. The signed
     # Flask session remains a convenience layer, but losing it can never log
     # the person out as long as their account is still active.
-    ticket = request.cookies.get(_AUTH_TICKET_COOKIE, "")
     recovered = _user_from_auth_ticket(ticket)
     if recovered:
         g.user = recovered
@@ -2525,7 +2537,10 @@ def public_about_sections(settings):
             if not isinstance(item, dict):
                 continue
             title=str(item.get("title", "")).strip()[:160]
-            body=str(item.get("body", "")).strip()
+            # Store/display About copy as plain text with real line breaks. Older
+            # drafts may contain literal HTML <br> tags; normalize those back to
+            # newlines so they never appear visibly in the public story.
+            body=re.sub(r"<br\s*/?>", "\n", str(item.get("body", "")), flags=re.I).strip()
             image=str(item.get("image", "")).strip()[:600]
             caption=str(item.get("caption", "")).strip()[:300]
             layout=item.get("layout", "reading")
@@ -3263,14 +3278,22 @@ def login():
             execute("UPDATE users SET qr_login_enabled=1,last_password_login_at=CURRENT_TIMESTAMP,qr_access_token=COALESCE(NULLIF(qr_access_token,''),lower(hex(randomblob(16)))) WHERE id=?", (user["id"],))
             user=q("SELECT * FROM users WHERE id=?",(user["id"],),one=True)
         login_id=record_login_event(user,'Password')
+        # A browser may still carry the previous account's server-backed auth cookie.
+        # Revoke it and issue a fresh ticket for the identity that just passed the
+        # password check, then explicitly replace the cookie on the redirect. Without
+        # this, a teacher can appear to log in correctly and be silently rehydrated as
+        # the previous Admin account on the very next request.
+        old_ticket=request.cookies.get(_AUTH_TICKET_COOKIE, '')
+        _revoke_auth_ticket(old_ticket)
+        fresh_ticket=_issue_auth_ticket(user["id"])
         session.clear(); session.permanent=True
         session["user_id"]=user["id"]; session["active_portal_role"]=user["role"]; session["login_event_id"]=login_id; session["login_location_pending"]=1
-        session["auth_ticket"] = _issue_auth_ticket(user["id"])
-        if next_url:
-            return redirect(next_url)
-        if learning_login:
-            return redirect(url_for("online_classes"))
-        return redirect(specialized_dashboard_for(user))
+        session["auth_ticket"] = fresh_ticket
+        destination = next_url or (url_for("online_classes") if learning_login else specialized_dashboard_for(user))
+        response=redirect(destination)
+        response.set_cookie(_AUTH_TICKET_COOKIE, fresh_ticket, max_age=_AUTH_COOKIE_MAX_AGE, httponly=True, secure=app.config.get("SESSION_COOKIE_SECURE", False), samesite="Lax", path="/")
+        response.set_cookie(_AUTH_COOKIE, _auth_token_for(user["id"]), max_age=_AUTH_COOKIE_MAX_AGE, httponly=True, secure=app.config.get("SESSION_COOKIE_SECURE", False), samesite="Lax", path="/")
+        return response
     return render_template("login.html", portal_title=settings["school_name"], school_settings=settings, theme_color=settings["primary_color"], login_role=role, next_url=next_url, login_context=login_context, success=("Password reset successfully. You can now sign in with your new password." if request.args.get("reset")=="success" else None), setup_required=not auth_initialized(), e_learning_login=(role=="E-Learning"), library_login=(role=="Library"))
 
 
@@ -4095,10 +4118,10 @@ def attendance_record():
     stamp=event_at or datetime.utcnow().isoformat(timespec='seconds')
     if attendance_day_is_closed(stamp): return jsonify({'ok':False,'message':f'Attendance for {attendance_date_from_value(stamp)} is closed by the school.'}),409
     lat=request.form.get('latitude',type=float); lon=request.form.get('longitude',type=float); accuracy=request.form.get('accuracy',type=float)
-    resolved_location=_attendance_event_location(lat,lon,request.form.get('location_label','').strip())
-    execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(current_user()['id'],action,'QR',token,stamp,request.form.get('source','online'),lat,lon,accuracy,request.form.get('speed_kph',type=float),request.form.get('device_note',''),resolved_location))
-    notify_users(attendance_admin_ids(),f'Attendance: {current_user()["full_name"]} checked {"IN" if action=="IN" else "OUT"}',f'{current_user()["full_name"]} checked {"in" if action=="IN" else "out"} at {_local_iso(_parse_stored_event(stamp)) or stamp}. Location: {resolved_location or "Exact coordinates captured; address lookup unavailable"}.',url_for('admin_attendance'))
-    return jsonify({'ok':True,'message':f'Checked {"in" if action=="IN" else "out"}.','event_at':stamp,'location_label':resolved_location})
+    result=record_account_attendance(current_user(),action,stamp,request.form.get('source','online'),'QR',lat,lon,accuracy,request.form.get('device_note',''),request.form.get('location_label','').strip())
+    if not result.get('ok'):
+        return jsonify(result), 409
+    return jsonify({'ok':True,'message':result['message'],'event_at':result['event_at'],'location_label':result.get('location_label',''),'user_id':current_user()['id'],'user_name':current_user()['full_name'],'role':current_user()['role']})
 
 @app.route("/attendance/sync",methods=['POST'])
 @login_required
@@ -4109,7 +4132,8 @@ def attendance_sync():
     for item in events[:100]:
         if item.get('token')!=office['token'] or str(item.get('action','')).upper() not in {'IN','OUT'}: continue
         if attendance_day_is_closed(item.get('event_at')): continue
-        execute("INSERT INTO attendance_events(user_id,action,method,office_token,event_at,source,latitude,longitude,accuracy,speed_kph,device_note,location_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(current_user()['id'],str(item['action']).upper(),'QR',office['token'],item.get('event_at') or None,'offline-sync',item.get('latitude'),item.get('longitude'),item.get('accuracy'),item.get('speed_kph'),item.get('device_note',''),_attendance_event_location(item.get('latitude'),item.get('longitude'),item.get('location_label','')))); saved+=1
+        result=record_account_attendance(current_user(),str(item['action']).upper(),item.get('event_at'),'offline-sync','QR',_payload_float(item,'latitude'),_payload_float(item,'longitude'),_payload_float(item,'accuracy'),item.get('device_note','offline qr'),item.get('location_label',''))
+        if result.get('ok'): saved+=1
     return jsonify({'ok':True,'saved':saved})
 
 
@@ -4187,23 +4211,26 @@ def admin_attendance_live():
     local_today=_local_now_naive().date().isoformat()
     today_start,today_end=attendance_day_bounds_utc(local_today)
     rows=q("""
-        SELECT u.id,u.full_name,u.role,COALESCE(NULLIF(u.title,''),u.role) AS title,
+        SELECT u.id,u.full_name,u.role,COALESCE(NULLIF(u.title,''),u.role) AS title,u.department,u.staff_category,u.workspace_type,
                (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS sign_in_at,
                (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS sign_out_at,
                (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? AND a.location_label!='' ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS location,
                (SELECT a.latitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS latitude,
                (SELECT a.longitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS longitude,
-               (SELECT a.accuracy FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS accuracy
+               (SELECT a.accuracy FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS accuracy,
+               (SELECT a.device_note FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS device_note
         FROM users u
         WHERE u.active=1 AND u.role NOT IN ('Student','Parent','System')
         ORDER BY u.full_name
-    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
+    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
     out=[]
+    day_closed=attendance_day_is_closed(local_today)
     for r in rows:
         item=dict(r)
         item['sign_in_local']=_local_iso(_parse_stored_event(item['sign_in_at'])) if item.get('sign_in_at') else None
         item['sign_out_local']=_local_iso(_parse_stored_event(item['sign_out_at'])) if item.get('sign_out_at') else None
-        # Role is always read from the staff account itself; never infer it from the scanner/admin account.
+        item['status_label'] = ('OUT' if item.get('sign_out_at') else 'IN') if item.get('sign_in_at') else ('Missed' if day_closed else 'Not signed in')
+        # Role/category comes from the employee account; never infer it from the scanner/admin account.
         out.append(item)
     return jsonify({'ok':True,'date':local_today,'rows':out})
 
@@ -4750,18 +4777,26 @@ def admin_dashboard():
     local_today=(datetime.utcnow()+KENYA_TZ_OFFSET).date().isoformat()
     today_start,today_end=attendance_day_bounds_utc(local_today)
     today_attendance=q("""
-        SELECT u.id,u.full_name,u.role,COALESCE(u.title,u.role) AS title,
+        SELECT u.id,u.full_name,u.role,COALESCE(u.title,u.role) AS title,u.department,u.staff_category,u.workspace_type,
                (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS sign_in_at,
                (SELECT a.event_at FROM attendance_events a WHERE a.user_id=u.id AND a.action='OUT' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at DESC,a.id DESC LIMIT 1) AS sign_out_at,
-               (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? AND a.location_label!='' ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS location
+               (SELECT a.location_label FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? AND a.location_label!='' ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS location,
+               (SELECT a.latitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS latitude,
+               (SELECT a.longitude FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS longitude,
+               (SELECT a.accuracy FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS accuracy,
+               (SELECT a.device_note FROM attendance_events a WHERE a.user_id=u.id AND a.action='IN' AND a.event_at>=? AND a.event_at<? ORDER BY a.event_at ASC,a.id ASC LIMIT 1) AS device_note
         FROM users u
         WHERE u.active=1 AND u.role NOT IN ('Student','Parent','System')
         ORDER BY u.full_name
-    """,(today_start,today_end,today_start,today_end,today_start,today_end))
+    """,(today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end,today_start,today_end))
     today_attendance=[dict(r) for r in today_attendance]
+    today_day_closed=attendance_day_is_closed(local_today)
     for r in today_attendance:
         r['sign_in_local']=_local_iso(_parse_stored_event(r['sign_in_at'])) if r.get('sign_in_at') else None
         r['sign_out_local']=_local_iso(_parse_stored_event(r['sign_out_at'])) if r.get('sign_out_at') else None
+        r['status_label'] = ('OUT' if r.get('sign_out_at') else 'IN') if r.get('sign_in_at') else ('Missed' if today_day_closed else 'Not signed in')
+        r['location_display']=r.get('location') or (f"{float(r['latitude']):.5f}, {float(r['longitude']):.5f}" if r.get('latitude') is not None and r.get('longitude') is not None else 'Not captured')
+        r['capture_display']=r.get('device_note') or 'Device details not captured'
     analytics_max_employee=max([int(r['c'] or 0) for r in categories['employees']] or [1])
     analytics_max_grade=max([int(r['c'] or 0) for r in categories['students']] or [1])
     analytics_max_payment=max([int(r['c'] or 0) for r in categories['payments']] or [1])
@@ -4801,6 +4836,7 @@ def admin_dashboard():
         archived_users=q("SELECT id, full_name, username, role, title, department, archived_at FROM users WHERE active=0 AND role!='System' ORDER BY archived_at DESC, full_name"),
         finance_closings=q("SELECT c.*,u.full_name AS submitted_name FROM finance_closings c JOIN users u ON u.id=c.submitted_by ORDER BY c.submitted_at DESC,c.id DESC LIMIT 20"),
         today_attendance=today_attendance,
+        today_day_closed=today_day_closed,
         local_today=local_today,
         analytics_max_employee=analytics_max_employee,
         analytics_max_grade=analytics_max_grade,

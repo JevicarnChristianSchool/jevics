@@ -1999,7 +1999,8 @@ def _client_error_logger_script():
   function read(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return []}}
   function save(o){try{var a=read();a.push(o);if(a.length>200)a=a.slice(-200);localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
   function send(o){o.request_id=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():String(Date.now())+'-'+Math.random();try{if(navigator.sendBeacon){var b=new Blob([JSON.stringify(o)],{type:'application/json'});if(navigator.sendBeacon(PATH,b))return}}catch(e){}try{fetch(PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),keepalive:true}).then(function(r){if(!r.ok)save(o)}).catch(function(){save(o)})}catch(e){save(o)}}
-  function log(level,message,stack,status){send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
+  function isBrowserExtensionError(message,stack){var s=String(message||'')+' '+String(stack||'');return /chrome-extension:\/\//i.test(s)||/moz-extension:\/\//i.test(s)||/safari-web-extension:\/\//i.test(s)}
+  function log(level,message,stack,status){if(isBrowserExtensionError(message,stack))return;send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
   window.__primeLogClientError=function(level,message,stack,status){log(level,message,stack,status)};
   window.addEventListener('error',function(e){log('ERROR',e.message||'JavaScript error',e.error&&e.error.stack||'',0)});
   window.addEventListener('unhandledrejection',function(e){var r=e.reason;log('ERROR',r&&r.message||String(r||'Unhandled promise rejection'),r&&r.stack||'',0)});
@@ -4712,6 +4713,17 @@ def dashboard():
 
 # Legacy teacher implementation retained below for compatibility with existing
 # links/bookmarks; /dashboard itself is now only the role dispatcher.
+
+@app.route("/admin/backup")
+@login_required
+@admin_root_required
+def admin_backup_center():
+    try:
+        settings = school_settings()
+    except Exception:
+        settings = {"school_name": "School Portal System"}
+    return render_template("admin_backup.html", settings=settings)
+
 
 @app.route("/admin/dashboard")
 @login_required

@@ -73,7 +73,7 @@
         <a href="/login?role=E-Learning&amp;next=%2Fonline-classes">E-Learning Portal</a>
         <a href="/login?role=Library&amp;next=%2Flibrary">Library Portal</a>
         <a href="/login?role=Librarian&amp;next=%2Flibrarian-dashboard">Librarian Portal</a>
-        <a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver Portal</a>
+        <a href="/login?role=Staff&amp;next=%2Fsupport-dashboard">Support Staff Portal</a><a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver Portal</a>
       </div>
     </div>
   </nav>
@@ -108,7 +108,7 @@
         <a href="/login?role=E-Learning&amp;next=%2Fonline-classes">E-Learning</a>
         <a href="/login?role=Library&amp;next=%2Flibrary">Library</a>
         <a href="/login?role=Librarian&amp;next=%2Flibrarian-dashboard">Librarian</a>
-        <a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver</a>
+        <a href="/login?role=Staff&amp;next=%2Fsupport-dashboard">Support Staff</a><a href="/login?role=Driver&amp;next=%2Fdriver-dashboard">Driver</a>
       </div>
     </div>
   </div>
@@ -271,7 +271,7 @@
     });
   });
   document.addEventListener('click',function(e){
-    if(menu && !e.target.closest('.landing-nav') && !e.target.closest('#landingMenuToggle')){menu.classList.remove('open'); document.body.classList.remove('landing-menu-open'); if(toggle)toggle.setAttribute('aria-expanded','false');}
+    if(menu && !e.target.closest('.landing-nav') && !e.target.closest('#landingMenuToggle')){menu.classList.remove('open'); document.body.classList.remove('landing-menu-open'); if(toggle)toggle.setAttribute('aria-expanded','false'); menu.querySelectorAll('.landing-nav-menu.open').forEach(function(m){m.classList.remove('open');}); menu.querySelectorAll('.landing-nav-trigger').forEach(function(t){t.setAttribute('aria-expanded','false');});}
   });
   menu && menu.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){menu.classList.remove('open');document.body.classList.remove('landing-menu-open');if(toggle)toggle.setAttribute('aria-expanded','false');});});
   const modal=document.getElementById('visitorQrModal');

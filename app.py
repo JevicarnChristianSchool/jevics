@@ -71,6 +71,7 @@ PULSE_TIMEOUT_SECONDS = max(1, min(10, int(os.environ.get("PULSE_TIMEOUT_SECONDS
 PULSE_ALLOWED_CALLBACK_HOSTS = {h.strip().lower() for h in os.environ.get("PULSE_ALLOWED_CALLBACK_HOSTS", "").split(",") if h.strip()}
 ALLOWED_RESTORE_EXT = {"db", "sqlite", "sqlite3"}
 PUBLIC_ROLES = ("Teacher", "Student", "Parent", "Librarian", "Driver")
+PORTAL_SELECTION_ROLES = set(PUBLIC_ROLES) | {"Staff"}
 HIDDEN_ROLES = ("Admin", "ICT", "Finance")
 QR_LOGIN_ROLES = {"Admin", "ICT", "Finance", "Teacher", "Librarian", "Driver"}
 QR_LOGIN_WORKSPACES = {"Teaching", "Driver", "Reception", "Guard", "Cook", "Other Staff"}
@@ -1246,6 +1247,8 @@ def _init_db_once() -> None:
         ensure_column(conn, "attendance_events", "accuracy REAL")
         conn.execute("CREATE TABLE IF NOT EXISTS attendance_absence_requests (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,absence_date TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Denied')),requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewed_by INTEGER,reviewed_at TEXT,review_note TEXT,UNIQUE(user_id,absence_date),FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_absence_date ON attendance_absence_requests(absence_date,status)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS support_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,item_name TEXT NOT NULL,quantity REAL NOT NULL DEFAULT 1,amount REAL NOT NULL,spent_at TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',evidence_path TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Rejected')),reviewed_by INTEGER,reviewed_at TEXT,review_note TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_support_expenses_status ON support_expenses(status,created_at)")
         conn.execute("CREATE TABLE IF NOT EXISTS staff_timetable (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,day_of_week INTEGER NOT NULL CHECK(day_of_week BETWEEN 0 AND 6),start_time TEXT NOT NULL,end_time TEXT NOT NULL,title TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1,created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_staff_timetable_user_day ON staff_timetable(user_id,day_of_week,start_time)")
         conn.execute("CREATE TABLE IF NOT EXISTS staff_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,role_scope TEXT NOT NULL DEFAULT 'All',title TEXT NOT NULL,due_at TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',priority TEXT NOT NULL DEFAULT 'Normal',completed INTEGER NOT NULL DEFAULT 0,created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)")
@@ -1326,6 +1329,9 @@ def _init_db_once() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_compulsory_subjects_class ON compulsory_subjects(class_name,active)")
         ensure_column(conn, "users", "workspace_type TEXT NOT NULL DEFAULT 'Teaching'")
         ensure_column(conn, "users", "staff_category TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "users", "ui_language TEXT NOT NULL DEFAULT 'en'")
+        ensure_column(conn, "users", "ui_theme_color TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "users", "ui_accent_color TEXT NOT NULL DEFAULT ''")
 
         # Diagnostics table is upgraded in-place so older school databases can read
         # and retain the richer error records introduced by later portal versions.
@@ -2169,6 +2175,7 @@ def role_target(role: str) -> str:
         "Parent": url_for("parent_dashboard"),
         "Librarian": url_for("librarian_dashboard"),
         "Driver": url_for("driver_dashboard"),
+        "Staff": url_for("support_dashboard"),
     }[role]
 
 
@@ -2299,7 +2306,7 @@ def specialized_dashboard_for(user) -> str:
     # because legacy data stored role='Teacher'.
     if role not in {"Admin","ICT"} and wt == "Reception": return url_for("reception_dashboard")
     if role not in {"Admin","ICT"} and wt == "Driver": return url_for("driver_dashboard")
-    if role not in {"Admin","ICT"} and wt in {"Guard","Cook","Other Staff"}: return url_for("workforce_dashboard", kind=wt)
+    if role not in {"Admin","ICT"} and wt in {"Guard","Cook","Other Staff","Support Staff"}: return url_for("support_dashboard")
     if role in {"Admin","ICT","Finance","Teacher","Parent","Librarian"}:
         return role_target(role)
     # Unknown/legacy staff is sent to the generic dashboard dispatcher rather
@@ -2337,7 +2344,7 @@ def selected_role_from_request(default=""):
     role = (request.args.get("role") or request.form.get("role") or default).strip()
     # E-Learning is a secure gateway label, not a stored user role. It may be
     # used only to select the dedicated learning login flow.
-    allowed = set(ALL_PORTAL_ROLES) | {"E-Learning", "Library"}
+    allowed = set(ALL_PORTAL_ROLES) | {"E-Learning", "Library", "Staff"}
     return role if role in allowed else default
 
 
@@ -2436,6 +2443,31 @@ def _rgba(hex_value, alpha):
     return f'rgba({r},{g},{b},{alpha})'
 
 
+
+def user_theme_style(settings=None, user=None) -> str:
+    """Return per-account visual overrides without mutating school-wide theme settings."""
+    settings=settings or school_settings(); user=user or current_user()
+    if not user: return ""
+    role=str(user["role"] or "")
+    wt=workspace_type_for_user(user)
+    defaults={
+        "Teacher": ("#f5fbff","#2563eb"),
+        "Student": ("#fffaf0","#e58a00"),
+        "Parent": ("#f8fafc","#0f766e"),
+        "Librarian": ("#f7f4ff","#7c3aed"),
+        "Driver": ("#f4fbf7","#15803d"),
+    }
+    if wt in {"Reception","Driver","Guard","Cook","Other Staff","Support Staff"} and role not in {"Admin","ICT"}:
+        bg,accent=("#f8fbf8","#15803d")
+    else: bg,accent=defaults.get(role,("#f7f9fc","#3457d5"))
+    bg=str(user["ui_theme_color"] or "").strip() if "ui_theme_color" in user.keys() else ""
+    accent_override=str(user["ui_accent_color"] or "").strip() if "ui_accent_color" in user.keys() else ""
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", accent_override): accent=accent_override
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", bg): bg=bg
+    # Keep text readable against a user-selected canvas.
+    text=_best_text(bg,"#101828",4.5)
+    return f"body.app-body{{--user-bg:{bg};--user-accent:{accent};background:var(--user-bg)!important;}} body.app-body .topbar,body.app-body .panel,body.app-body .mini-card,body.app-body .info-card{{border-top-color:color-mix(in srgb,var(--user-accent) 45%,transparent);}} body.app-body .topbar h1,body.app-body .topbar h2,body.app-body .panel h1,body.app-body .panel h2,body.app-body .panel h3{{color:{text};}} body.app-body .btn-primary{{background:var(--user-accent);border-color:var(--user-accent);}} body.app-body a{{--primary-blue:var(--user-accent);}}"
+
 def theme_style(settings=None) -> str:
     settings = settings or school_settings()
     def clean(v, fallback):
@@ -2480,7 +2512,7 @@ def theme_style(settings=None) -> str:
             f"body.app-body .panel p,body.app-body .panel td,body.app-body .panel th,body.auth-body:not(.landing-body) .info-card p{{color:var(--panel-text);}}"
             f"body.app-body a{{color:var(--primary-blue);}}body.app-body .muted{{color:var(--muted-text);}}"
             f"body.app-body input,body.app-body select,body.app-body textarea{{color:var(--input-text);background:var(--panel-3);}}" )
-    return css+bg_image+safety+extra
+    return css+bg_image+safety+extra+user_theme_style(settings)
 
 def theme_preset_style(settings=None) -> str:
     settings=settings or school_settings()
@@ -2596,7 +2628,7 @@ def auth_template_context():
     settings=school_settings()
     return {
         "current_user": current_user(), "school_settings": settings, "portal_title": settings["school_name"], "theme_color": settings["primary_color"], "all_roles": ALL_PORTAL_ROLES, "public_roles": PUBLIC_ROLES,
-        "theme_style": theme_style(settings), "theme_preset_style": theme_preset_style(settings), "landing_style": landing_style(settings), "portal_landing_url": current_landing_url(), "about_sections": public_about_sections(settings), "about_first_image": public_about_first_image(settings),
+        "theme_style": theme_style(settings), "user_theme_style": user_theme_style(settings), "theme_preset_style": theme_preset_style(settings), "ui_language": ((current_user()["ui_language"] if current_user() and "ui_language" in current_user().keys() else "en") or "en").lower(), "landing_style": landing_style(settings), "portal_landing_url": current_landing_url(), "about_sections": public_about_sections(settings), "about_first_image": public_about_first_image(settings),
         "active_adverts": active_advertisements(),
         "welcome_animation": bool(settings["welcome_animation_enabled"]), "welcome_animation_name": settings["welcome_animation_name"], "welcome_animation_duration_ms": int(settings["welcome_animation_duration_ms"] or 2200), "welcome_animation_style": settings["welcome_animation_style"] if "welcome_animation_style" in settings.keys() else "clean",
         "important_dates": important_dates(12, landing=request.path == '/'),
@@ -2633,6 +2665,7 @@ def workspace_for(role: str) -> str:
         "Parent": "Parent Dashboard",
         "Librarian": "Library Workspace",
         "Staff": "Staff Workspace",
+        "Support Staff": "Support Staff Workspace",
     }.get(role, "School Portal System")
 
 
@@ -4680,6 +4713,17 @@ def dashboard():
 # Legacy teacher implementation retained below for compatibility with existing
 # links/bookmarks; /dashboard itself is now only the role dispatcher.
 
+@app.route("/admin/backup")
+@login_required
+@admin_root_required
+def admin_backup_center():
+    try:
+        settings = school_settings()
+    except Exception:
+        settings = {"school_name": "School Portal System"}
+    return render_template("admin_backup.html", settings=settings)
+
+
 @app.route("/admin/dashboard")
 @login_required
 @role_required("Admin")
@@ -5365,6 +5409,73 @@ def ict_features():
     elections=1 if request.form.get("elections_enabled") else 0; library=1 if request.form.get("library_enabled") else 0
     execute("UPDATE school_settings SET elections_enabled=?, library_enabled=? WHERE id=1",(elections,library)); flash("Module visibility updated.","success"); return redirect(url_for("ict_dashboard") if current_user()["role"]=="ICT" else url_for("admin_dashboard"))
 
+
+@app.route("/support-dashboard")
+@login_required
+def support_dashboard():
+    user=current_user()
+    wt=workspace_type_for_user(user)
+    if user["role"] in {"Admin","ICT"}:
+        return redirect(role_target(user["role"]))
+    if wt not in {"Reception","Driver","Guard","Cook","Other Staff","Support Staff"}:
+        return redirect(specialized_dashboard_for(user))
+    settings=school_settings()
+    expenses=q("SELECT * FROM support_expenses WHERE user_id=? ORDER BY spent_at DESC,id DESC LIMIT 40",(user["id"],))
+    language=((user["ui_language"] if "ui_language" in user.keys() else "en") or "sw").lower()
+    return render_template("support_dashboard.html",settings=settings,actor_name=user["full_name"],role=user["role"],workspace_type=wt,expenses=expenses,language=language,today=_local_now_naive().strftime("%Y-%m-%d"))
+
+@app.route("/support/expenses", methods=["POST"])
+@login_required
+def support_expense_submit():
+    user=current_user(); wt=workspace_type_for_user(user)
+    if wt not in {"Reception","Driver","Guard","Cook","Other Staff","Support Staff"}: abort(403)
+    item=(request.form.get("item_name") or "").strip()[:160]
+    desc=(request.form.get("description") or "").strip()[:1000]
+    try: qty=max(0.01,float(request.form.get("quantity","1") or 1))
+    except Exception: qty=1
+    try: amount=max(0,float(str(request.form.get("amount","0") or 0).replace(",","")))
+    except Exception: amount=-1
+    spent=(request.form.get("spent_at") or _local_now_naive().strftime("%Y-%m-%d"))[:10]
+    evidence=request.files.get("evidence")
+    path=""
+    if evidence and evidence.filename:
+        ext=Path(evidence.filename).suffix.lower()
+        if ext not in {".png",".jpg",".jpeg",".webp",".pdf"}:
+            flash("Evidence must be an image or PDF.","danger"); return redirect(url_for("support_dashboard"))
+        dest=UPLOAD_DIR/"support_expenses"; dest.mkdir(exist_ok=True)
+        out=dest/f"{uuid.uuid4().hex}-{secure_filename(evidence.filename)}"; evidence.save(out); path="uploads/support_expenses/"+out.name
+    if not item or amount <= 0:
+        flash("Enter what was bought and the amount.","danger"); return redirect(url_for("support_dashboard"))
+    eid=execute("INSERT INTO support_expenses(user_id,item_name,quantity,amount,spent_at,description,evidence_path,status) VALUES(?,?,?,?,?,?,?,?)",(user["id"],item,qty,amount,spent,desc,path,"Pending"))
+    admins=[r["id"] for r in q("SELECT id FROM users WHERE active=1 AND role='Admin'")]
+    notify_users(admins,"Support spending needs review",f"{user['full_name']} submitted {item} · KES {amount:,.2f} for review.","/notifications#support-expenses","High")
+    audit(user["id"],user["full_name"],"Support spending submitted",f"#{eid} {item} · KES {amount:,.2f}")
+    flash("Submitted to Admin for review. It will not enter the financial records until approved.","success")
+    return redirect(url_for("support_dashboard"))
+
+@app.route("/admin/support-expenses/<int:expense_id>/review", methods=["POST"])
+@login_required
+@role_required("Admin")
+def review_support_expense(expense_id:int):
+    action=(request.form.get("decision") or "").strip().lower()
+    note=(request.form.get("review_note") or "").strip()[:1000]
+    row=q("SELECT * FROM support_expenses WHERE id=?",(expense_id,),one=True)
+    if not row: abort(404)
+    if row["status"]!="Pending":
+        flash("This spending request has already been reviewed.","warning"); return redirect(url_for("notifications_view"))
+    if action not in {"approve","reject"}: abort(400)
+    if action=="approve":
+        ref=f"SUP-{expense_id:06d}"
+        execute("INSERT INTO finance_ledger(entry_type,category,payee_user_id,amount,description,reference_no,status,posted_by,receipt_path) VALUES('Expense','Support Staff Spending',?,?,?,?,?,?,?)",(row["user_id"],row["amount"],f"{row['item_name']} (qty {row['quantity']:g}) — {row['description']}".strip(),ref,"Posted",current_user()["id"],row["evidence_path"]))
+        status="Approved"; message="approved"
+    else:
+        status="Rejected"; message="rejected"
+    execute("UPDATE support_expenses SET status=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP,review_note=? WHERE id=?",(status,current_user()["id"],note,expense_id))
+    notify_users([row["user_id"]],f"Support spending {message}",f"Your spending request for {row['item_name']} was {message} by Admin.{(' Note: '+note) if note else ''}","/support-dashboard","Normal")
+    audit(current_user()["id"],current_user()["full_name"],f"Support spending {message}",f"#{expense_id} {row['item_name']} · KES {row['amount']}")
+    flash(f"Spending request {message}.","success")
+    return redirect(url_for("notifications_view")+"#support-expenses")
+
 @app.route("/finance-dashboard")
 @login_required
 @role_required("Finance", "Admin")
@@ -5723,7 +5834,10 @@ def notifications_view():
                FROM attendance_absence_requests ar JOIN users u ON u.id=ar.user_id
                WHERE ar.absence_date>=? AND ar.absence_date<=? AND u.active=1 AND u.role NOT IN ('Student','Parent','System')
                ORDER BY ar.absence_date DESC,ar.id DESC LIMIT 500""",(start_date.isoformat(),end_date.isoformat()))
-    return render_template("notifications.html",settings=school_settings(),notifications=rows,actor_name=user["full_name"],role=user["role"],notification_recipients=recipients,notification_classes=classes,attendance_rows=attendance_rows,absence_rows=absence_rows,attendance_window=attendance_window)
+    support_expenses=[]
+    if user["role"]=="Admin":
+        support_expenses=q("SELECT e.*,u.full_name AS staff_name FROM support_expenses e JOIN users u ON u.id=e.user_id WHERE e.status='Pending' ORDER BY e.created_at DESC,e.id DESC LIMIT 100")
+    return render_template("notifications.html",settings=school_settings(),notifications=rows,actor_name=user["full_name"],role=user["role"],notification_recipients=recipients,notification_classes=classes,attendance_rows=attendance_rows,absence_rows=absence_rows,attendance_window=attendance_window,support_expenses=support_expenses)
 
 @app.route("/notifications/read", methods=["POST"])
 @login_required
@@ -6173,6 +6287,13 @@ def profile():
         if not full_name:
             flash("Full name is required.", "danger")
         else:
+            ui_language=(request.form.get("ui_language") or (user["ui_language"] if "ui_language" in user.keys() else "en")).strip().lower()
+            if ui_language not in {"en","sw"}: ui_language="en"
+            color=(request.form.get("ui_theme_color") or "").strip()
+            accent=(request.form.get("ui_accent_color") or "").strip()
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}",color): color=""
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}",accent): accent=""
+
             if password:
                 if len(password) < 4:
                     flash("Password must be at least 4 characters.", "danger")
@@ -6189,11 +6310,12 @@ def profile():
                 out=folder/f"user-{user['id']}-{uuid.uuid4().hex[:12]}.{ext}"
                 photo.save(out)
                 execute("UPDATE users SET profile_photo=? WHERE id=?", ("uploads/profile_photos/"+out.name,user["id"]))
+            execute("UPDATE users SET ui_language=?, ui_theme_color=?, ui_accent_color=? WHERE id=?",(ui_language,color,accent,user["id"]))
             session["user_id"] = user["id"]
             audit(user["id"], full_name, "Profile Update", "Profile details, password and/or profile photo updated.")
             flash("Profile updated successfully.", "success")
             return redirect(url_for("profile"))
-    profile_user = q("SELECT id, full_name, username, role, created_at, profile_photo, student_id FROM users WHERE id = ?", (user["id"],), one=True)
+    profile_user = q("SELECT id, full_name, username, role, created_at, profile_photo, student_id, ui_language, ui_theme_color, ui_accent_color FROM users WHERE id = ?", (user["id"],), one=True)
     exam_card = q("SELECT id,qr_token,created_at FROM portal_documents WHERE document_type='Exam Card' AND student_id=? AND status='Valid' ORDER BY created_at DESC,id DESC LIMIT 1", (profile_user["student_id"],), one=True) if profile_user and profile_user["student_id"] else None
     return render_template("profile.html", profile_user=profile_user, workspace=workspace_for(profile_user["role"]), exam_card=exam_card)
 
@@ -7071,6 +7193,7 @@ def add_user():
         uid=execute("""INSERT INTO users(full_name, username, password_hash, role, student_id, active, title, department, phone, email, date_of_birth, gender, id_reference, address, emergency_contact, blood_group, medical_notes, accountability_notes, workspace_type, staff_category, school_unit, school_location, reception_enabled, position_code, staff_code, qr_access_token, qr_login_enabled)
                       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), 1)""",
                    (full_name,username,generate_password_hash(password),role,student_id,title,department,request.form.get("phone","").strip(),request.form.get("email","").strip(),request.form.get("date_of_birth","").strip(),request.form.get("gender","").strip(),request.form.get("id_reference","").strip(),request.form.get("address","").strip(),request.form.get("emergency_contact","").strip(),request.form.get("blood_group","").strip(),request.form.get("medical_notes","").strip(),request.form.get("accountability_notes","").strip(),workspace_type,staff_category,school_unit,school_location,reception_enabled,position_code,position_code))
+        if staff_category == "Support Staff" or workspace_type in {"Driver","Reception","Guard","Cook","Other Staff"}: execute("UPDATE users SET ui_language='sw' WHERE id=?",(uid,))
         if leadership_role and role not in {"Student","Parent","System"}:
             execute("UPDATE users SET leadership_role=?,leadership_level=? WHERE id=?",(leadership_role,1 if leadership_role in {"Dean","Deputy","Deputy Principal","HOD","Head of Department"} else 0,uid))
         audit(actor["id"],actor["full_name"],"Add User",f"{full_name} ({username}) added as {role}; title={title or '—'}; department={department or '—'}.")

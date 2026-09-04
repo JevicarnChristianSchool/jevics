@@ -751,7 +751,6 @@ body.auth-body.landing-body .landing-dropdown{
   border-radius:13px!important;
   box-shadow:0 18px 38px rgba(23,42,64,.14)!important;
 }
-body.auth-body.landing-body .landing-nav-menu:hover .landing-dropdown,
 body.auth-body.landing-body .landing-nav-menu.open .landing-dropdown{display:grid!important}
 body.auth-body.landing-body .landing-dropdown-wide{grid-template-columns:1fr 1fr!important;min-width:470px!important}
 body.auth-body.landing-body .landing-dropdown-portal{min-width:300px!important}
@@ -891,7 +890,7 @@ body.auth-body.landing-body .landing-nav-login{background:rgba(255,255,255,.17)!
 body.auth-body.landing-body .landing-dropdown{position:absolute!important;top:60px!important;left:0!important;min-width:280px!important;max-width:500px!important;display:none!important;padding:10px!important;gap:3px!important;background:#fff!important;border:1px solid #dce1e7!important;border-radius:15px!important;box-shadow:0 18px 44px rgba(18,35,56,.18)!important}
 body.auth-body.landing-body .landing-dropdown-wide{min-width:520px!important;grid-template-columns:1fr 1fr!important}
 body.auth-body.landing-body .landing-dropdown-portal,.landing-dropdown-portal-login{grid-template-columns:1fr!important}
-body.auth-body.landing-body .landing-nav-menu:hover .landing-dropdown,body.auth-body.landing-body .landing-nav-menu.open .landing-dropdown{display:grid!important}
+body.auth-body.landing-body .landing-nav-menu.open .landing-dropdown{display:grid!important}
 body.auth-body.landing-body .landing-dropdown a{min-height:46px!important;display:flex!important;align-items:center!important;padding:0 13px!important;border-radius:9px!important;color:#1c2025!important;font-size:15px!important;font-weight:680!important;text-decoration:none!important}
 body.auth-body.landing-body .landing-dropdown a:hover{background:#eef4fb!important;color:#214f83!important}
 body.auth-body.landing-body .landing-drop-title{grid-column:1/-1;padding:8px 13px 10px;color:#757b82!important;font-size:10px!important;font-weight:850!important;text-transform:uppercase!important;letter-spacing:.13em!important}

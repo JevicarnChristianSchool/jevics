@@ -4713,17 +4713,6 @@ def dashboard():
 # Legacy teacher implementation retained below for compatibility with existing
 # links/bookmarks; /dashboard itself is now only the role dispatcher.
 
-@app.route("/admin/backup")
-@login_required
-@admin_root_required
-def admin_backup_center():
-    try:
-        settings = school_settings()
-    except Exception:
-        settings = {"school_name": "School Portal System"}
-    return render_template("admin_backup.html", settings=settings)
-
-
 @app.route("/admin/dashboard")
 @login_required
 @role_required("Admin")

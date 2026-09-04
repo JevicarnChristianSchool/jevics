@@ -283,37 +283,7 @@
       <tr><td>Employees</td><td><a class="btn btn-ghost mini" href="/export/employees/csv">CSV</a></td><td><a class="btn btn-ghost mini" href="/export/employees/docx">Word</a></td><td><a class="btn btn-ghost mini" href="/export/employees/pdf">PDF</a></td></tr>
       <tr><td>Attendance</td><td><a class="btn btn-ghost mini" href="/export/attendance/csv">CSV</a></td><td><a class="btn btn-ghost mini" href="/export/attendance/docx">Word</a></td><td><a class="btn btn-ghost mini" href="/export/attendance/pdf">PDF</a></td></tr>
       </tbody></table></div></section>
-<section id="backup-quick" class="panel glass" style="margin-top:14px">
-  <div class="panel-head">
-    <div>
-      <div class="eyebrow">Backup & restore</div>
-      <h3>Full portal recovery</h3>
-      <p class="muted">Protect the entire portal or restore it from a previously downloaded ZIP. The full archive includes the database, settings, signing secret and uploaded files.</p>
-    </div>
-  </div>
-  <div class="detail-card" style="margin-top:14px">
-    <h4 style="margin-bottom:6px">Create a backup</h4>
-    <div class="quick-actions">
-      <a class="btn btn-primary" href="/backup/download">Download full portal ZIP</a>
-      <a class="btn btn-ghost" href="/backup/json">Data-only JSON backup</a>
-      <a class="btn btn-ghost" href="/backup/sqlite-download">SQLite rollback copy</a>
-    </div>
-  </div>
-  <div class="detail-card" style="margin-top:14px">
-    <h4 style="margin-bottom:6px">Upload & restore a full portal ZIP</h4>
-    <p class="muted" style="margin-bottom:10px">Choose the ZIP backup you saved on your computer. The current database is automatically kept as a safety rollback copy before restoration.</p>
-    <form class="stack-form" method="post" action="{{ url_for('backup_full_restore') }}" enctype="multipart/form-data">
-      <label>
-        <span>Backup ZIP file</span>
-        <input type="file" name="full_backup_file" accept=".zip,application/zip" required>
-      </label>
-      <button class="btn btn-primary" type="submit" onclick="return confirm('Restore the entire portal from this ZIP? The current portal state will be replaced, with a safety database copy retained first.')">Upload & restore full portal</button>
-    </form>
-  </div>
-  <div class="quick-actions" style="margin-top:12px">
-    <a class="btn btn-ghost" href="/admin/backup">Open detailed Backup & Restore page</a>
-  </div>
-</section>
+<section id="backup-quick" class="panel glass" style="margin-top:14px"><div class="panel-head"><div><div class="eyebrow">Backup & restore</div><h3>Full portal recovery</h3><p class="muted">Create a complete ZIP backup or restore one directly from this admin page. A safety copy is kept before a full restore.</p></div></div><div class="quick-actions"><a class="btn btn-primary" href="/backup/download">Download full portal ZIP</a><a class="btn btn-ghost" href="/backup/json">Data-only JSON backup</a><a class="btn btn-ghost" href="/backup/sqlite-download">SQLite rollback copy</a></div><div class="detail-card" style="margin-top:14px"><h4 style="margin:0 0 6px">Upload & restore full portal ZIP</h4><form class="stack-form" method="post" action="{{ url_for('backup_full_restore') }}" enctype="multipart/form-data"><label><span>Choose backup ZIP</span><input type="file" name="full_backup_file" accept=".zip" required></label><button class="btn btn-primary" type="submit" onclick="return confirm('Restore the entire portal from this ZIP? Current portal data will be replaced; a safety database copy will be kept.')">Upload & restore</button></form></div></section>
 <section id="backup-panel" class="panel glass workspace-panel hidden">
       <div class="panel-head"><div><div class="eyebrow">Backup</div><h3>Restore and protect the site</h3></div></div>
       <div class="detail-card" style="margin-bottom:16px">

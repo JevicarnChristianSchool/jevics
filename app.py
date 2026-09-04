@@ -1999,8 +1999,7 @@ def _client_error_logger_script():
   function read(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return []}}
   function save(o){try{var a=read();a.push(o);if(a.length>200)a=a.slice(-200);localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
   function send(o){o.request_id=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():String(Date.now())+'-'+Math.random();try{if(navigator.sendBeacon){var b=new Blob([JSON.stringify(o)],{type:'application/json'});if(navigator.sendBeacon(PATH,b))return}}catch(e){}try{fetch(PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),keepalive:true}).then(function(r){if(!r.ok)save(o)}).catch(function(){save(o)})}catch(e){save(o)}}
-  function isBrowserExtensionError(message,stack){var s=String(message||'')+' '+String(stack||'');return /chrome-extension:\/\//i.test(s)||/moz-extension:\/\//i.test(s)||/safari-web-extension:\/\//i.test(s)}
-  function log(level,message,stack,status){if(isBrowserExtensionError(message,stack))return;send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
+  function log(level,message,stack,status){send({level:level||'ERROR',message:String(message||'Browser error').slice(0,5000),stack:String(stack||'').slice(0,12000),status_code:Number(status||0),context:location.pathname+location.search,client_context:JSON.stringify({url:location.href,online:navigator.onLine,ua:navigator.userAgent})})}
   window.__primeLogClientError=function(level,message,stack,status){log(level,message,stack,status)};
   window.addEventListener('error',function(e){log('ERROR',e.message||'JavaScript error',e.error&&e.error.stack||'',0)});
   window.addEventListener('unhandledrejection',function(e){var r=e.reason;log('ERROR',r&&r.message||String(r||'Unhandled promise rejection'),r&&r.stack||'',0)});
@@ -4713,6 +4712,22 @@ def dashboard():
 
 # Legacy teacher implementation retained below for compatibility with existing
 # links/bookmarks; /dashboard itself is now only the role dispatcher.
+
+def admin_root_user():
+    uid=flask_session.get("user_id")
+    if not uid:
+        return None
+    return q("SELECT id,full_name,role,active FROM users WHERE id=? AND role='Admin' AND active=1 LIMIT 1", (uid,), one=True)
+
+def admin_root_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        actor=admin_root_user()
+        if not actor:
+            abort(403)
+        g.admin_actor=actor
+        return view(*args, **kwargs)
+    return wrapper
 
 @app.route("/admin/backup")
 @login_required
@@ -7801,22 +7816,6 @@ def _json_backup_payload(include_assets=True):
                 continue
     settings=dict(q("SELECT * FROM school_settings WHERE id=1",one=True) or {})
     return {"format":"Prime Institution OS Full System JSON","version":2,"created_at":datetime.utcnow().isoformat(timespec='seconds')+'Z',"settings":settings,"tables":tables,"assets":assets,"notes":"Restore through Administration > Backup & Recovery. Password hashes are preserved; plaintext passwords and API keys are never exported."}
-
-def admin_root_user():
-    uid=flask_session.get("user_id")
-    if not uid:
-        return None
-    return q("SELECT id,full_name,role,active FROM users WHERE id=? AND role='Admin' AND active=1 LIMIT 1", (uid,), one=True)
-
-def admin_root_required(view):
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        actor=admin_root_user()
-        if not actor:
-            abort(403)
-        g.admin_actor=actor
-        return view(*args, **kwargs)
-    return wrapper
 
 @app.route('/api/system-errors/client', methods=['POST'])
 def client_system_error():
